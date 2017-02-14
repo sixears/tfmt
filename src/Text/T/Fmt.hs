@@ -235,7 +235,7 @@ fmtTest =
     , testCase "1000000 B" $ [fmt|%Y|] (1000000 :: Int) @?= ("977KiB" :: Text)
     , testCase "1048576 b" $ [fmt|%y|] (1048576 :: Int) @?= ("1.05MB" :: Text)
     , testCase "1048576 B" $ [fmt|%Y|] (1048576 :: Int) @?= ("1.00MiB" :: Text)
-    , testCase "1073741824 b" $ [fmt|%y|] (1024^^3) @?= ("1.07GB" :: Text)
+    , testCase "1073741824 b" $ [fmt|%7y|] (1024^^3) @?= (" 1.07GB" :: Text)
     , testCase "1073741824 B" $ [fmt|%Y|] (1024^^3) @?= ("1.00GiB" :: Text)
     , testCase "1073741824 B" $ [fmt|%Y|] (1024^^3) @?= ("1.00GiB" :: Text)
     ]

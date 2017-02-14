@@ -268,7 +268,9 @@ charOp 'e' _ Nothing  = appE (varE 'expt) (litE (integerL 0))
 charOp 'e' _ (Just i) = appE (varE 'expt) (litE (integerL $ fromIntegral i))
 
 charOp 'y' _ Nothing = appE (varE 'toFormatBytes) (conE 'B_1000)
+charOp 'y' _ (Just _) = error $ "y format does not handle precision"
 charOp 'Y' _ Nothing = appE (varE 'toFormatBytes) (conE 'B_1024)
+charOp 'Y' _ (Just _) = error $ "Y format does not handle precision"
 
 charOp x _ p = let errPfx = "bad conversion char or unhandled precision: '"
                 in error $ errPfx ++ [x] ++ "' (" ++ show p ++ ")"
