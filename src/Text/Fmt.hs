@@ -98,7 +98,7 @@ concatTokens ts                    = ts
 
 -- | parse a string into tokens
 tokenP :: Stream s m Char => ParsecT s u m [Token]
-tokenP = many (simpleStr <|> try escapePC <|> conversion)
+tokenP = many (simpleStr <|> try escapePC <|> try escapeSlash <|> conversion)
 
 ----------------------------------------
 
@@ -131,13 +131,23 @@ precision = read <$> (char '.' *> many digit)
 
 -- | parser for an unadorned string (without any % chars)
 simpleStr :: Stream s m Char => ParsecT s u m Token
-simpleStr = Str <$> many1 (noneOf "%")
+simpleStr = Str <$> many1 (noneOf "%\\")
 
 ----------------------------------------
 
 -- | parser for an escaped '%' (represented in the incoming string as "%%")
 escapePC :: Stream s m Char => ParsecT s u m Token
 escapePC = Str <$> const "%" <$> string "%%"
+
+----------------------------------------
+
+-- | parser for slash escapes, e.g., \\, \n, \t
+escapeSlash :: Stream s m Char => ParsecT s u m Token
+escapeSlash = (Str . decode) <$> (char '\\' *> oneOf "nt\\")
+              where decode 'n'  = "\n"
+                    decode 't'  = "\t"
+                    decode '\\' = "\\"
+                    decode c    = error $ "bad decode char: '" ++ [c] ++ "'"
 
 ----------------------------------------
 
@@ -268,9 +278,9 @@ charOp 'e' _ Nothing  = appE (varE 'expt) (litE (integerL 0))
 charOp 'e' _ (Just i) = appE (varE 'expt) (litE (integerL $ fromIntegral i))
 
 charOp 'y' _ Nothing = appE (varE 'toFormatBytes) (conE 'B_1000)
-charOp 'y' _ (Just _) = error $ "y format does not handle precision"
+charOp 'y' _ (Just _) = error "y format does not handle precision"
 charOp 'Y' _ Nothing = appE (varE 'toFormatBytes) (conE 'B_1024)
-charOp 'Y' _ (Just _) = error $ "Y format does not handle precision"
+charOp 'Y' _ (Just _) = error "Y format does not handle precision"
 
 charOp x _ p = let errPfx = "bad conversion char or unhandled precision: '"
                 in error $ errPfx ++ [x] ++ "' (" ++ show p ++ ")"

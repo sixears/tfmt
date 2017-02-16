@@ -173,7 +173,15 @@ fmtTest =
     , testCase "a%-3sc"   $ [fmt|a%3sc|]    "b"   @?= ("a  bc" :: Text)
     , testCase "a%-3lc"   $ [fmt|a%2lc|]    "b"   @?= ("a bc" :: Text)
     , testCase "a%-3Lc"   $ [fmt|a%5Lc|] (["b","d"] :: [LazyText.Text])
-                                                 @?= ("a  b,dc" :: Text)
+                                                  @?= ("a  b,dc" :: Text)
+
+    , testCase "a%-3sc"   $ [fmt|n|]                @?= ("n" :: Text)
+    , testCase "a%-3sc"   $ [fmt|\n|]               @?= ("\n" :: Text)
+    , testCase "a%-3sc"   $ [fmt|a%3s\nc|]    "b"   @?= ("a  b\nc" :: Text)
+    , testCase "a%-3sc"   $ [fmt|a%3s\tc|]    "b"   @?= ("a  b\tc" :: Text)
+    , testCase "a%-3sc"   $ [fmt|a%3s\\ntc|]    "b"   @?= ("a  b\\ntc" :: Text)
+    , testCase "a%-3sc"   $ [fmt|a\t%3s\nc|]    "b"   @?= ("a\t  b\nc" :: Text)
+
 
     , testCase "a%-3wc" $ [fmt|a%-3wc|] ("b" :: String) @?= ("a\"b\"c" :: Text)
     , testCase "a%-5wc" $ [fmt|a%-5wc|] ("b" :: String) @?= ("a\"b\"  c"::Text)
