@@ -2,6 +2,10 @@
 {-# LANGUAGE QuasiQuotes     #-}
 {-# LANGUAGE TemplateHaskell #-}
 
+{-# OPTIONS_HADDOCK hide #-}
+
+{- | tests for Text.Fmt -}
+
 module Text.T.Fmt
   ( _test, unitTests )
 where
@@ -57,12 +61,17 @@ data TestToText = TestToText Text
 instance ToText TestToText where
   toText (TestToText t) = "ttt: " `append` t
 
+ts :: [TestToText]
+ts =  [ TestToText "c", TestToText "b", TestToText "a" ]
+
+-- | run the tests
 _test :: IO ()
 _test = defaultMain tests
 
 tests :: TestTree
 tests = testGroup "tests" [ unitTests ]
 
+-- | unit tests
 unitTests :: TestTree
 unitTests = testGroup "unitTests" [ hunitGroup ]
 
@@ -153,10 +162,17 @@ tokensTest =
 sprintfTest :: TestTree
 sprintfTest =
   testGroup "sprintf"
-    [ testCase "foo"     $ $( sprintf "foo"   )          @?= ("foo" :: Text)
+    [ testCase "foo"     $ $( sprintf "foo"   )          @?= ("foo"    :: Text)
     , testCase "foo%t"   $ $( sprintf "foo%t" )    "bar" @?= ("foobar" :: Text)
     , testCase "%tfoo"   $ $( sprintf "%tfoo" )    "bar" @?= ("barfoo" :: Text)
     , testCase "fo%bzs"  $ $( sprintf "fo%tbz" )   "br"  @?= ("fobrbz" :: Text)
+
+    , testCase "%d"      $ $( sprintf "%d"  ) (  7  :: Int) @?= ("7"   :: Text)
+    , testCase "%d (-)"  $ $( sprintf "%d"  ) ((-7) :: Int) @?= ("-7"  :: Text)
+    , testCase "%dC"     $ $( sprintf "%dC" ) (  7  :: Int) @?= ("7C"  :: Text)
+    , testCase "F%d"     $ $( sprintf "F%d" ) (  7  :: Int) @?= ("F7"  :: Text)
+    , testCase "-%d"     $ $( sprintf "-%d" ) (  7  :: Int) @?= ("-7"  :: Text)
+    , testCase "-%d"     $ $( sprintf "-%d" ) ((-7) :: Int) @?= ("--7" :: Text)
     ]
 
 fmtTest :: TestTree
@@ -164,7 +180,9 @@ fmtTest =
   let (^^) :: Int -> Int -> Int
       x ^^ y = x ^ y
    in testGroup "fmt"
-    [ testCase "foo%t"    $ [fmt|foo%tbaz|] "bar" @?= ("foobarbaz" :: Text)
+    [ testCase "-empty-"  $ [fmt||]               @?= ("" :: Text)
+
+    , testCase "foo%t"    $ [fmt|foo%tbaz|] "bar" @?= ("foobarbaz" :: Text)
     , testCase "a%3tc"    $ [fmt|a%3tc|]    "b"   @?= ("a  bc" :: Text)
     , testCase "a%-3tc"   $ [fmt|a%-3tc|]   "b"   @?= ("ab  c" :: Text)
     , testCase "a%-03tc"  $ [fmt|a%-03tc|]  "b"   @?= ("ab00c" :: Text)
@@ -207,12 +225,17 @@ fmtTest =
     , testCase "%-4b"     $ [fmt|%-4b|]      (6 :: Int)  @?= ("110 " :: Text)
     , testCase "%2b"      $ [fmt|%2b|]       (6 :: Int)  @?= ( "110" :: Text)
 
-    , testCase "%f"     $ [fmtT|%f|]       (6 :: Int)    @?=  "6"
+    , testCase "%f"     $ [fmtT|%f|]      (6 :: Int)     @?=  "6"
     , testCase "%f"     $ [fmtT|%f|]    (6.5 :: Float)   @?=  "6.5"
     , testCase "%f"     $ [fmtT|%f|]    (6.2 :: Double)  @?=  "6.2"
 
+    , testCase "%L"       $ [fmtT|(%L)|]     ts  @?=  "(ttt: c,ttt: b,ttt: a)"
+    , testCase "%22L"     $ [fmtT|(%22L)|]   ts  @?=  "(  ttt: c,ttt: b,ttt: a)"
+
     , testCase "%3f"     $ [fmtT|%3f|]    (6 :: Int)       @?=  "  6"
     , testCase "%3.2f"   $ [fmtT|%3.2f|]  (6.2 :: Float)   @?=  "6.20"
+    , testCase "%3.2f"   $ [fmtT|%3.2f|]  (6.005 :: Float) @?=  "6.01"
+    , testCase "%3.2f"   $ [fmtT|%3.2f|]  (6.002 :: Float) @?=  "6.00"
     , testCase "%05.2f"  $ [fmtT|%05.2f|] (6.2 :: Double)  @?=  "06.20"
     , testCase "%-5.2f"  $ [fmtT|%-5.2f|] (6.2 :: Double)  @?=  "6.20 "
     , testCase "%.3f"    $ [fmtT|%.3f|]   (6.2 :: Double)  @?=  "6.200"
@@ -228,6 +251,13 @@ fmtTest =
     , testCase "as lazy text" $ [fmtL|a%03tc|] "b" @?= "a00bc"
     , testCase "fmtT"        $ [fmtT|a%03tc|] "b" @?= ("a00bc" :: Text)
     , testCase "as strict text" $ [fmtT|a%03tc|] "b" @?= "a00bc"
+
+    , testCase "%d"      $ [fmtT|%d|]  (  7  :: Int) @?= ("7"   :: Text)
+    , testCase "%d (-)"  $ [fmtT|%d|]  ((-7) :: Int) @?= ("-7"  :: Text)
+    , testCase "%dC"     $ [fmtT|%dC|] (  7  :: Int) @?= ("7C"  :: Text)
+    , testCase "F%d"     $ [fmtT|F%d|] (  7  :: Int) @?= ("F7"  :: Text)
+    , testCase "-%d"     $ [fmtT|-%d|] (  7  :: Int) @?= ("-7"  :: Text)
+    , testCase "-%d"     $ [fmtT|-%d|] ((-7) :: Int) @?= ("--7" :: Text)
 
     , testCase "0 b" $ [fmt|%Y|] (0 :: Int) @?= ("0" :: Text)
     , testCase "0 B" $ [fmt|%y|] (0 :: Int) @?= ("0" :: Text)

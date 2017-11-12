@@ -7,8 +7,34 @@
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE ViewPatterns         #-}
 
+{- | Format Text or Strings, in a type-safe way, using Quasi Quotations.
+
+    @    
+    import Text.Fmt   ( fmt )
+    import Data.Text  ( pack )
+
+    -- fmt produces Text or String per type inference
+    [fmt|This is some %t|] (pack "text") == "This is some text"
+    @
+
+    A module to provide type-safe printf-alike functionality in Haskell.  __Note
+    that both the QuasiQuotes and OverloadedStrings extensions are necessary in
+    practice__, frankly I'm not sure why OverloadedStrings is.  Without it, you
+    may get errors a bit like this:
+
+    @
+      • Couldn't match expected type ‘Format (Integer -> Text) (Int -> t)’
+                  with actual type ‘[Char]’
+      • In the first argument of ‘(%)’, namely
+    @
+ -}
+
 module Text.Fmt
-  ( ByteFmtBase(..)
+  ( -- * Format Specifiers
+
+    -- $formatting
+
+    ByteFmtBase(..), FormatTarget(..)
   , fmt, fmtS, fmtL, fmtT, formatBytes
   -- for testing only
   , Token(..), conversion, fill, sprintf, tokens )
@@ -23,11 +49,12 @@ import Control.Applicative    ( (<*), (<*>), (*>), (<|>), many )
 import Data.Char              ( Char, toUpper )
 import Data.Either            ( Either( Left, Right ) )
 import Data.Eq                ( Eq, (==) )
-import Data.Foldable          ( Foldable, foldr1, toList )
+import Data.Foldable          ( Foldable, foldr, toList )
 import Data.Function          ( (.), ($), const )
 import Data.Functor           ( (<$>), fmap )
-import Data.List              ( (++), concat )
+import Data.List              ( concat )
 import Data.Maybe             ( Maybe( Just, Nothing ) )
+import Data.Monoid            ( (<>) )
 import Data.Ord               ( (<), (>) )
 import Data.String            ( String )
 import Data.Word              ( Word8 )
@@ -72,14 +99,13 @@ import Data.Text  ( Text, intercalate, pack, unpack )
 
 import Data.Text.Conv  ( ToText( toText ) )
 
--------------------------------------------------------------------------------
+------------------------------------------------------------
+--                     local imports                      --
+------------------------------------------------------------
 
-data Token = -- | a conversion specifier, e.g., %3.2f; the first value is the
-             --   fill, if any - the width, and the char (default ' ', may be
-             --   '0')
-             Conversion (Maybe (Integer, Char)) (Maybe Natural) Char
-           | Str String
-  deriving (Eq, Show)
+import Text.Fmt.Token  ( Token( Conversion, Str ) )
+
+-------------------------------------------------------------------------------
 
 -- | tokenize a string into strings & conversions
 tokens :: Text -> Either ParseError [Token]
@@ -90,7 +116,7 @@ tokens s = concatTokens <$> parse (tokenP <* eof) (unpack s) s
 -- | squish consecutive Str together
 
 concatTokens :: [Token] -> [Token]
-concatTokens (Str s : Str s' : ts) = concatTokens (Str (s ++ s') : ts)
+concatTokens (Str s : Str s' : ts) = concatTokens (Str (s <> s') : ts)
 concatTokens (t : t' : ts)         = t : t' : ts
 concatTokens ts                    = ts
 
@@ -147,10 +173,11 @@ escapeSlash = (Str . decode) <$> (char '\\' *> oneOf "nt\\")
               where decode 'n'  = "\n"
                     decode 't'  = "\t"
                     decode '\\' = "\\"
-                    decode c    = error $ "bad decode char: '" ++ [c] ++ "'"
+                    decode c    = error $ "bad decode char: '" <> [c] <> "'"
 
 ----------------------------------------
 
+{- | whether to format a bytes value in terms of powers of 10^3, or 2^10 -}
 data ByteFmtBase = B_1000 | B_1024
   deriving Eq
 
@@ -174,21 +201,20 @@ formatBytes b bs =
                               6 -> (Just 'E', 6)
                               7 -> (Just 'Z', 7)
                               _ -> (Just 'Y', 8)
+                formatB n = fixed n % Formatters.char % Formatters.string % "B"
+                i = if b == B_1024 then "i" else ""
              in case pfx of
                  Nothing -> sformat (int % "B") bytes
                  Just c  -> let mant = (fromIntegral bytes) / (x^exp)
+                                c_   = if b == B_1024 then toUpper c else c
                              in if mant < 10
                                 then -- [fmt|%3.2f%T%sB|]
-                                     sformat (fixed 2 % Formatters.char % Formatters.string % "B")
-                                     mant (if b == B_1024 then toUpper c else c)
-                                          (if b == B_1024 then "i" else "")
+                                     sformat (formatB 2) mant c_ i
                                 else if mant < 100
                                      then -- [fmt|%4.1f%T%sB|]
-                                          sformat (fixed 1 % Formatters.char % Formatters.string % "B")
-                                          mant (toUpper c) (if b == B_1024 then "i" else "")
+                                          sformat (formatB 1) mant (toUpper c) i
                                      else -- [fmt|%4f%T%sB|]
-                                          sformat (fixed 0 % Formatters.char % Formatters.string % "B")
-                                          mant (toUpper c) (if b == B_1024 then "i" else "")
+                                          sformat (formatB 0) mant (toUpper c) i
 
 
 ----------------------------------------
@@ -213,7 +239,8 @@ sprintf_ :: Name -> Text -> ExpQ
 sprintf_ fnam t =
   case tokens t of
     Left  e    -> error $ show e
-    Right toks -> appE (varE fnam) $ foldr1 conjoin (fmap tokOp toks)
+    Right toks -> appE (varE fnam) $
+                      foldr conjoin (litE $ stringL "") (fmap tokOp toks)
                   where conjoin = infixOp '(%)
 
 -- | conversion token as formatter; e.g., %-3t => (left 3 ' ') %. stext
@@ -223,7 +250,7 @@ tokOp (Conversion Nothing p c)      = charOp c Nothing p
 tokOp (Conversion (Just (i,c)) p o) =
   infixOp '(%.) (fillOp (i,c)) (charOp o (Just i) p)
 -- tokOp (Conversion x y)         =
---   error $ "failed conversion: " ++ show x ++ ", " ++ show y
+--   error $ "failed conversion: " <> show x <> ", " <> show y
 
 ----------------------------------------
 
@@ -248,29 +275,126 @@ toTextF = later $ LazyBuilder.fromText . toText
 
 toTextListF :: (Foldable f, ToText t) => Format r (f t -> r)
 toTextListF =
-  later $
---    LazyBuilder.fromLazyText . LazyText.intercalate "," .
-    LazyBuilder.fromText . intercalate "," .
---      fmap toLazyText . toList
-      fmap toText . toList
+  later $ LazyBuilder.fromText . intercalate "," . fmap toText . toList
 
 toFormatBytes :: Integral a => ByteFmtBase -> Format r (a -> r)
 toFormatBytes b = later $ LazyBuilder.fromText . formatBytes b
 
+----------------------------------------
+
+{- $formatting
+
+   Each specfier may be preceded by an integer value to specify padding and
+   justification.  A positive integer pads to the left (thus, justifies to the
+   right; and a negative integer pads to the right (thus, justifies to the
+   left).
+
+   >>> [fmtT|[%3s]|] "a"
+   "[  a]"
+
+   >>> [fmtT|[%-3s]|] "a"
+   "[a  ]"
+
+   Where noted below, some specifiers also allow a precision (after a 'decimal
+   point').
+
+   [@L@] - A foldable of things, where the things are instances of ToText,
+           joined with ',', thus
+           @ (`Foldable` φ, ToText τ) => φ intercalate "," (fmap toText τ) @
+
+   [@l@] - LazyText `LazyText.Text`
+
+   [@s@] - `String`
+
+   [@t@] - StrictText `Text`
+
+   [@T@] - `ToText` @ τ => toText τ @
+
+   [@w@] - `Show` @ ω => show ω @
+
+   [@d@] - `Integral` α => render as denary
+
+   [@x@] - `Integral` α => render as hexadenary
+
+   [@b@] - `Integral` α => render as binary
+
+   [@o@] - `Integral` α => render as octal
+
+   [@f@] - `Real` α => Render as decimal with as many decimal places as
+                       necessary.  Beware floating-point representation which
+                       may give lengthy results.
+
+   [@f.n@] - `Real` α => Render as decimal with precisely /n/ decimal places.
+                         Will round to the nearest decimal place as appropriate.
+
+   [@e@] - `Real` α => Render as decimal in scientific notation with 0 decimal
+                       places in the mantissa.
+
+                       >>> [fmtT|[%-e]|] (3.14 :: Float)
+                       "[3e0]"
+
+                       Note that the padding width, if provided, applies to the
+                       whole representation; thus the below adds one space
+                       because "3e-1" is 4 characters.
+
+                       >>> [fmtT|[%5e]|] (0.314 :: Float)
+                       "[ 3e-1]"
+
+
+   [@e.n@] - `Real` α => Render as decimal in scientific notation with precisely
+                         /n/ decimal places in the mantissa.
+
+                         >>> [fmtT|[%-.1e]|] (0.314 :: Float)
+                         "[3.1e-1]"
+
+   [@y@] - `Integral` α => Render as bytes, with a 2^10 multiplier.  This tries
+                           to fit the value into 7 characters.
+
+                           >>> [fmtT|%y|] (1024^(2::Int) :: Integer)
+                           "1.05MB"
+
+                           >>> [fmtT|%y|] (1024 :: Integer)
+                           "1.02kB"
+
+                           >>> [fmtT|%y|] (999 :: Integer)
+                           "999B"
+
+
+   [@Y@] - `Integral` α => Render as bytes, with a 2^10 multiplier.  This tries
+                           to fit the value into 7 characters.
+
+                           >>> [fmtT|%Y|] (999 :: Integer)
+                           "999B"
+
+                           >>> [fmtT|%Y|] (1024*1023 :: Integer)
+                           "1023KiB"
+
+                           >>> [fmtT|%Y|] (1024*1024 :: Integer)
+                           "1.00MiB"
+
+-}
+
+charOpNoPrecision :: ExpQ -> Char -> Maybe Natural -> ExpQ
+charOpNoPrecision f _ Nothing  = f
+charOpNoPrecision _ c (Just p) = error $ "conversion char '" <> [c]
+                                      <> "' does not admit precision ("
+                                      <> show p <> ")"
+
 -- | conversion character as formatter; e.g., 't' -> stext; takes precision
 --   too, lest that affect the conversion
 charOp :: Char -> Maybe Integer -> Maybe Natural -> ExpQ
-charOp 'L' _ _ = varE 'toTextListF
-charOp 'l' _ _ = varE 'text
-charOp 's' _ _ = varE 'Formatters.string
-charOp 't' _ _ = varE 'stext
-charOp 'T' _ _ = varE 'toTextF
-charOp 'w' _ _ = varE 'shown
 
-charOp 'd' _ _ = varE 'int
-charOp 'x' _ _ = varE 'hex
-charOp 'b' _ _ = varE 'bin
-charOp 'o' _ _ = varE 'oct
+charOp c@'L' _ p = charOpNoPrecision (varE 'toTextListF) c p
+charOp c@'l' _ p = charOpNoPrecision (varE 'text) c p
+charOp c@'s' _ p = charOpNoPrecision (varE 'Formatters.string) c p
+charOp c@'t' _ p = charOpNoPrecision (varE 'stext) c p
+charOp c@'T' _ p = charOpNoPrecision (varE 'toTextF) c p
+charOp c@'w' _ p = charOpNoPrecision (varE 'shown) c p
+
+charOp c@'d' _ p = charOpNoPrecision (varE 'int) c p
+charOp c@'x' _ p = charOpNoPrecision (varE 'hex) c p
+charOp c@'b' _ p = charOpNoPrecision (varE 'bin) c p
+charOp c@'o' _ p = charOpNoPrecision (varE 'oct) c p
 
 charOp 'f' _ Nothing  = varE 'float
 charOp 'f' _ (Just i) = appE (varE 'fixed) (litE (integerL $ fromIntegral i))
@@ -282,8 +406,7 @@ charOp 'y' _ (Just _) = error "y format does not handle precision"
 charOp 'Y' _ Nothing = appE (varE 'toFormatBytes) (conE 'B_1024)
 charOp 'Y' _ (Just _) = error "Y format does not handle precision"
 
-charOp x _ p = let errPfx = "bad conversion char or unhandled precision: '"
-                in error $ errPfx ++ [x] ++ "' (" ++ show p ++ ")"
+charOp x _ _ = error $ "bad conversion char'" <> [x] <> "'"
 
 ----------------------------------------
 
@@ -292,6 +415,18 @@ infixOp :: Name -> ExpQ -> ExpQ -> ExpQ
 infixOp op l r = infixE (Just l) (varE op) (Just r)
 
 ----------------------------------------
+
+-- | Generate an instance of FormatTarget (e.g., Strict or Lazy Text, or String)
+--   from a format and set of values.
+--
+--   >>> ([fmt|foo %s|] ("baz" :: String)) :: Text
+--   "foo baz"
+--
+--   >>> :t [fmtS|bar %t|] ("quux" :: Text)
+--   [fmtS|bar %t|] ("quux" :: Text) :: [Char]
+--
+--   >>> [fmtS|bar %t|] ("quux" :: Text)
+--  "bar quux"
 
 fmt :: QuasiQuoter
 fmt =  QuasiQuoter { quoteDec  = error "not implemented"
@@ -302,6 +437,7 @@ fmt =  QuasiQuoter { quoteDec  = error "not implemented"
 
 --------------------
 
+-- | like `fmt`, but produces specifically a String
 fmtS :: QuasiQuoter
 fmtS =  QuasiQuoter { quoteDec  = error "not implemented"
                     , quoteType = error "not implemented"
@@ -311,6 +447,7 @@ fmtS =  QuasiQuoter { quoteDec  = error "not implemented"
 
 --------------------
 
+-- | like `fmt`, but produces specifically a Lazy Text
 fmtL :: QuasiQuoter
 fmtL =  QuasiQuoter { quoteDec  = error "not implemented"
                     , quoteType = error "not implemented"
@@ -320,6 +457,7 @@ fmtL =  QuasiQuoter { quoteDec  = error "not implemented"
 
 --------------------
 
+-- | like `fmt`, but produces specifically a Strict Text
 fmtT :: QuasiQuoter
 fmtT =  QuasiQuoter { quoteDec  = error "not implemented"
                     , quoteType = error "not implemented"
@@ -328,6 +466,8 @@ fmtT =  QuasiQuoter { quoteDec  = error "not implemented"
                     }
 
 ------------------------------------------------------------
+
+-- | possible target of `fmt` or similar.
 
 class FormatTarget t where
   output :: Format t a -> a

@@ -1,3 +1,7 @@
+0.1.2.1 2017-11-12
+==================
+- Document.  Catch at compile-time the inappropriate use of precision.
+
 0.1.2.0 2017-02-16
 ==================
 - add handling of slash escapes \\, \t, n
