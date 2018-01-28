@@ -18,12 +18,17 @@ import Data.Bifunctor   ( first )
 import Data.Either      ( Either( Left, Right ) )
 import Data.Eq          ( Eq )
 import Data.Function    ( ($) )
-import Data.List        ( (++), isInfixOf )
+import Data.List        ( isInfixOf )
 import Data.Maybe       ( Maybe( Just, Nothing ) )
+import Data.Monoid      ( (<>) )
 import Data.String      ( String, unlines )
 import Numeric.Natural  ( Natural )
 import System.IO        ( IO )
 import Text.Show        ( Show, show )
+
+-- data-textual ------------------------
+
+import Data.Textual  ( Printable( print ) )
 
 -- parsec ------------------------------
 
@@ -39,12 +44,13 @@ import Test.Tasty.HUnit  ( Assertion, (@?=), assertBool, testCase )
 
 -- text --------------------------------
 
-import Data.Text  ( Text, append, unpack )
 import qualified  Data.Text.Lazy  as  LazyText
 
--- textconv ----------------------------
+import Data.Text  ( Text, unpack )
 
-import Data.Text.Conv  ( ToText( toText ) )
+-- text-printer ------------------------
+
+import qualified  Text.Printer  as  P
 
 ------------------------------------------------------------
 --                     local imports                      --
@@ -58,8 +64,8 @@ import Text.Fmt  ( ByteFmtBase( B_1024, B_1000 ), Token( Conversion, Str )
 
 data TestToText = TestToText Text
 
-instance ToText TestToText where
-  toText (TestToText t) = "ttt: " `append` t
+instance Printable TestToText where
+  print (TestToText t) = P.text $ "ttt: " <> t
 
 ts :: [TestToText]
 ts =  [ TestToText "c", TestToText "b", TestToText "a" ]
@@ -93,9 +99,9 @@ formatBytesTest =
   let (^^) :: Int -> Int -> Int
       x ^^ y = x ^ y
       testBy :: Int -> Text -> TestTree
-      testBy v ex = testCase (show v ++ "b") $ formatBytes B_1000 v @?= ex
+      testBy v ex = testCase (show v <> "b") $ formatBytes B_1000 v @?= ex
       testBi :: Int -> Text -> TestTree
-      testBi v ex = testCase (show v ++ "b") $ formatBytes B_1024 v @?= ex
+      testBi v ex = testCase (show v <> "b") $ formatBytes B_1024 v @?= ex
    in testGroup "formatBytes" $
         [ testBi 0 "0"
         , testBy 0 "0"
@@ -127,7 +133,7 @@ fillTest = testGroup "fill" $
 
 cmp :: (Eq a, Show a) => Either String a -> Either String a -> Assertion
 cmp (Left l) (Left r) =
-  assertBool (unlines ["expected: " ++ r, "got: " ++l]) $ r `isInfixOf` l
+  assertBool (unlines ["expected: " <> r, "got: " <> l]) $ r `isInfixOf` l
 cmp l r = l @?= r
 
 tokensTest :: TestTree

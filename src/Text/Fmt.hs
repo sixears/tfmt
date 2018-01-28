@@ -63,6 +63,10 @@ import Numeric.Natural        ( Natural )
 import Text.Read              ( read )
 import Text.Show              ( Show( show ) )
 
+-- data-textual ------------------------
+
+import Data.Textual  ( Printable, toText )
+
 -- formatting --------------------------
 
 import qualified  Formatting.Formatters  as  Formatters
@@ -94,10 +98,6 @@ import qualified  Data.Text.Lazy.Builder  as LazyBuilder
 
 import Data.Text  ( Text, intercalate, pack, unpack )
 
-
--- textconv ----------------------------
-
-import Data.Text.Conv  ( ToText( toText ) )
 
 ------------------------------------------------------------
 --                     local imports                      --
@@ -269,11 +269,11 @@ fillOp (_,_) = -- i == 0 : something's gone wrong!
 
 ----------------------------------------
 
-toTextF :: ToText t => Format r (t -> r)
+toTextF :: Printable t => Format r (t -> r)
 -- toTextF = later $ LazyBuilder.fromLazyText . toLazyText
 toTextF = later $ LazyBuilder.fromText . toText
 
-toTextListF :: (Foldable f, ToText t) => Format r (f t -> r)
+toTextListF :: (Foldable f, Printable t) => Format r (f t -> r)
 toTextListF =
   later $ LazyBuilder.fromText . intercalate "," . fmap toText . toList
 
@@ -298,9 +298,9 @@ toFormatBytes b = later $ LazyBuilder.fromText . formatBytes b
    Where noted below, some specifiers also allow a precision (after a 'decimal
    point').
 
-   [@L@] - A foldable of things, where the things are instances of ToText,
+   [@L@] - A foldable of things, where the things are instances of Printable,
            joined with ',', thus
-           @ (`Foldable` φ, ToText τ) => φ intercalate "," (fmap toText τ) @
+           @ (`Foldable` φ, Printable τ) => φ intercalate "," (fmap toText τ) @
 
    [@l@] - LazyText `LazyText.Text`
 
@@ -308,7 +308,7 @@ toFormatBytes b = later $ LazyBuilder.fromText . formatBytes b
 
    [@t@] - StrictText `Text`
 
-   [@T@] - `ToText` @ τ => toText τ @
+   [@T@] - `Printable` @ τ => toText τ @
 
    [@w@] - `Show` @ ω => show ω @
 
