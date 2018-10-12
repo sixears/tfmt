@@ -1,3 +1,8 @@
+0.2.1.0 2018-10-12
+==================
+- remove use of expt from Formatting.Formatters (because it is removed in
+  formatting-6.3.0)
+
 0.1.2.1 2017-11-12
 ==================
 - Document.  Catch at compile-time the inappropriate use of precision.

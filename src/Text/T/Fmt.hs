@@ -215,7 +215,7 @@ fmtTest =
     , testCase "a%3dc:-7" $ [fmt|a%3dc|] (-7 :: Int)      @?= ("a -7c" :: Text)
     , testCase "a%03dc"   $ [fmt|a%03dc|] (7 :: Int)      @?= ("a007c" :: Text)
     , testCase "a%-3dc"   $ [fmt|a%-3dc|] (7 :: Int)      @?= ("a7  c" :: Text)
-    , testCase "a%3dc: 7" $ [fmt|a%3dc|]  (7 :: Natural)  @?= ("a  7c" :: Text)
+    , testCase "a%3dc: 7" $ [fmt|a%3nc|]  (7 :: Natural)  @?= ("a  7c" :: Text)
       -- I'm not sure what -03d should be - it would make sense to me to be
       -- '700', but bash & perl both say '7  '
 
@@ -246,10 +246,10 @@ fmtTest =
     , testCase "%-5.2f"  $ [fmtT|%-5.2f|] (6.2 :: Double)  @?=  "6.20 "
     , testCase "%.3f"    $ [fmtT|%.3f|]   (6.2 :: Double)  @?=  "6.200"
 
-    , testCase "%e"     $ [fmtT|%e|]       (1000000 :: Int)  @?=     "1e6"
-    , testCase "%.2e"   $ [fmtT|%.2e|]     (1000000 :: Int)  @?=  "1.00e6"
-    , testCase "%5.2e"  $ [fmtT|%5.2e|]    (1000000 :: Int)  @?=  "1.00e6"
-    , testCase "%7.2e"  $ [fmtT|%7.2e|]    (1000000 :: Int)  @?= " 1.00e6"
+    , testCase "%e"     $ [fmtT|%e|]       (1000000 :: Double)  @?=      "10e5"
+    , testCase "%.2e"   $ [fmtT|%.2e|]     (1000000 :: Double)  @?=   "10.00e5"
+    , testCase "%5.2e"  $ [fmtT|%5.2e|]    (9999999 :: Double)  @?=   "10.00e6"
+    , testCase "%7.2e"  $ [fmtT|%9.2e|]    (1000000 :: Double)  @?= "  10.00e5"
 
     , testCase "fmtS"         $ [fmtS|a%03tc|] "b" @?= ("a00bc" :: String)
     , testCase "as string"    $ [fmtS|a%03tc|] "b" @?=  "a00bc"

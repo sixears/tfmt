@@ -4,6 +4,7 @@
 {-# LANGUAGE OverloadedStrings    #-}
 {-# LANGUAGE ScopedTypeVariables  #-}
 {-# LANGUAGE TemplateHaskell      #-}
+{-# LANGUAGE TypeApplications     #-}
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE ViewPatterns         #-}
 
@@ -40,8 +41,10 @@ module Text.Fmt
   , Token(..), conversion, fill, sprintf, tokens )
 where
 
-import Prelude ( Double, Integer, Integral, (/), (^)
-               , abs, error, floor, fromIntegral, toInteger )
+import Prelude ( Double, Int, Integer, Integral, Real, RealFloat
+               , (+), (-), (/), (^), (**)
+               , abs, decodeFloat, error, floor, fromIntegral, toInteger
+               )
 
 -- base --------------------------------
 
@@ -52,7 +55,7 @@ import Data.Eq                ( Eq, (==) )
 import Data.Foldable          ( Foldable, foldr, toList )
 import Data.Function          ( (.), ($), const )
 import Data.Functor           ( (<$>), fmap )
-import Data.List              ( concat )
+import Data.List              ( concat, elem )
 import Data.Maybe             ( Maybe( Just, Nothing ) )
 import Data.Monoid            ( (<>) )
 import Data.Ord               ( (<), (>) )
@@ -72,9 +75,9 @@ import Data.Textual  ( Printable, toText )
 import qualified  Formatting.Formatters  as  Formatters
 
 import Formatting             ( Format, (%), (%.)
-                              , format, formatToString, later, sformat )
-import Formatting.Formatters  ( bin, expt, fixed, float, hex, int, left
-                              , oct, right, shown, stext, text )
+                              , format, formatToString, later, mapf, sformat )
+import Formatting.Formatters  ( Buildable, bin, fixed, hex, int, left
+                              , oct, right, shortest, shown, stext, text )
 
 -- parsec ------------------------------
 
@@ -96,7 +99,7 @@ import Language.Haskell.TH.Quote
 import qualified  Data.Text.Lazy          as  LazyText
 import qualified  Data.Text.Lazy.Builder  as LazyBuilder
 
-import Data.Text  ( Text, intercalate, pack, unpack )
+import Data.Text  ( Text, dropWhileEnd, intercalate, pack, unpack )
 
 
 ------------------------------------------------------------
@@ -134,7 +137,7 @@ conversion :: Stream s m Char => ParsecT s u m Token
 conversion =
   Conversion <$> (string "%" *> optionMaybe fill)
              <*> optionMaybe precision
-             <*> (oneOf "bdeflLostTwxyY" <?> "valid conversion char")
+             <*> (oneOf "bdeflLnostTwxyY" <?> "valid conversion char")
 
 ----------------------------------------
 
@@ -169,7 +172,7 @@ escapePC = Str <$> const "%" <$> string "%%"
 
 -- | parser for slash escapes, e.g., \\, \n, \t
 escapeSlash :: Stream s m Char => ParsecT s u m Token
-escapeSlash = (Str . decode) <$> (char '\\' *> oneOf "nt\\")
+escapeSlash = Str . decode <$> (char '\\' *> oneOf "nt\\")
               where decode 'n'  = "\n"
                     decode 't'  = "\t"
                     decode '\\' = "\\"
@@ -182,13 +185,13 @@ data ByteFmtBase = B_1000 | B_1024
   deriving Eq
 
 -- | try really hard to fit within 7 chars
-formatBytes :: Integral a => ByteFmtBase -> a -> Text
+formatBytes :: (Buildable a, Integral a) => ByteFmtBase -> a -> Text
 formatBytes _ (toInteger -> 0) = "0"
 formatBytes b bs =
     case b of
       B_1000 -> go 1000 bs -- (byteSize bs)
       B_1024 -> go 1024 bs -- (fromIntegral $ byteSize bs)
-    where go :: Integral b => Double -> b -> Text
+    where go :: (Buildable b, Integral b) => Double -> b -> Text
           go x bytes =
             let ex :: Word8 = floor (logBase x $ fromIntegral bytes)
                 (pfx,exp) :: (Maybe Char, Word8)= case ex of
@@ -205,7 +208,7 @@ formatBytes b bs =
                 i = if b == B_1024 then "i" else ""
              in case pfx of
                  Nothing -> sformat (int % "B") bytes
-                 Just c  -> let mant = (fromIntegral bytes) / (x^exp)
+                 Just c  -> let mant = fromIntegral bytes / (x^exp)
                                 c_   = if b == B_1024 then toUpper c else c
                              in if mant < 10
                                 then -- [fmt|%3.2f%T%sB|]
@@ -277,7 +280,7 @@ toTextListF :: (Foldable f, Printable t) => Format r (f t -> r)
 toTextListF =
   later $ LazyBuilder.fromText . intercalate "," . fmap toText . toList
 
-toFormatBytes :: Integral a => ByteFmtBase -> Format r (a -> r)
+toFormatBytes :: (Buildable a, Integral a) => ByteFmtBase -> Format r (a -> r)
 toFormatBytes b = later $ LazyBuilder.fromText . formatBytes b
 
 ----------------------------------------
@@ -313,6 +316,8 @@ toFormatBytes b = later $ LazyBuilder.fromText . formatBytes b
    [@w@] - `Show` @ ω => show ω @
 
    [@d@] - `Integral` α => render as denary
+
+   [@n@] - `Natural` α => render as denary
 
    [@x@] - `Integral` α => render as hexadenary
 
@@ -395,8 +400,9 @@ charOp c@'d' _ p = charOpNoPrecision (varE 'int) c p
 charOp c@'x' _ p = charOpNoPrecision (varE 'hex) c p
 charOp c@'b' _ p = charOpNoPrecision (varE 'bin) c p
 charOp c@'o' _ p = charOpNoPrecision (varE 'oct) c p
+charOp c@'n' _ p = charOpNoPrecision (varE 'nat) c p
 
-charOp 'f' _ Nothing  = varE 'float
+charOp 'f' _ Nothing  = varE 'floatmin
 charOp 'f' _ (Just i) = appE (varE 'fixed) (litE (integerL $ fromIntegral i))
 charOp 'e' _ Nothing  = appE (varE 'expt) (litE (integerL 0))
 charOp 'e' _ (Just i) = appE (varE 'expt) (litE (integerL $ fromIntegral i))
@@ -407,6 +413,33 @@ charOp 'Y' _ Nothing = appE (varE 'toFormatBytes) (conE 'B_1024)
 charOp 'Y' _ (Just _) = error "Y format does not handle precision"
 
 charOp x _ _ = error $ "bad conversion char'" <> [x] <> "'"
+
+floatmin :: Real α => Format r (α -> r)
+floatmin = let dropper = dropWhileEnd (`elem` (".0" :: String))
+            in later $ LazyBuilder.fromText . dropper . sformat shortest
+
+nat :: Format r (Natural -> r)
+nat = mapf (fromIntegral :: Natural -> Integer) int
+
+expt ::  RealFloat α => Int -> Format r (α -> r)
+expt i = later (\ f ->
+  let (m,e :: Integer) = decompose f
+   in LazyBuilder.fromText $ (sformat $ (fixed i % "e" % int)) m e)
+
+
+-- | decompose a Real value into "engineering" notation; a mantissa between
+--   (-10,10) and an exponent, as a power of 10
+decompose :: (RealFloat α, Integral β) => α -> (Double, β)
+decompose val = let (mant2,ex2) = decodeFloat val
+                    mant2d :: Double = fromIntegral(abs mant2)
+                    ex2d   :: Double = fromIntegral ex2
+                    res    :: Double = log10 mant2d + log10 (2**ex2d)
+                    ex10             = floor res
+                    log10  :: Double -> Double = logBase 10
+                    mant10 :: Double = 10**(res - (fromIntegral ex10::Double))
+                 in if mant2 > 0
+                    then (mant10,ex10)
+                    else (-mant10,ex10) 
 
 ----------------------------------------
 
