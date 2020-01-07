@@ -1,6 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE QuasiQuotes     #-}
-{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE QuasiQuotes       #-}
+{-# LANGUAGE TemplateHaskell   #-}
+{-# LANGUAGE UnicodeSyntax     #-}
 
 {-# OPTIONS_HADDOCK hide #-}
 
@@ -22,6 +23,7 @@ import Data.List        ( isInfixOf )
 import Data.Maybe       ( Maybe( Just, Nothing ) )
 import Data.Monoid      ( (<>) )
 import Data.String      ( String, unlines )
+import Data.Word        ( Word8 )
 import Numeric.Natural  ( Natural )
 import System.IO        ( IO )
 import Text.Show        ( Show, show )
@@ -185,19 +187,22 @@ fmtTest :: TestTree
 fmtTest =
   let (^^) :: Int -> Int -> Int
       x ^^ y = x ^ y
+      bar = "bar" ∷ String
    in testGroup "fmt"
     [ testCase "-empty-"  $ [fmt||]               @?= ("" :: Text)
 
-    , testCase "foo%t"    $ [fmt|foo%tbaz|] "bar" @?= ("foobarbaz" :: Text)
+    , testCase "foo%tbaz" $ [fmt|foo%tbaz|] "bar" @?= ("foobarbaz" :: Text)
     , testCase "a%3tc"    $ [fmt|a%3tc|]    "b"   @?= ("a  bc" :: Text)
     , testCase "a%-3tc"   $ [fmt|a%-3tc|]   "b"   @?= ("ab  c" :: Text)
     , testCase "a%-03tc"  $ [fmt|a%-03tc|]  "b"   @?= ("ab00c" :: Text)
     , testCase "a%03tc"   $ [fmt|a%03tc|]   "b"   @?= ("a00bc" :: Text)
 
     , testCase "a%-3sc"   $ [fmt|a%3sc|]    "b"   @?= ("a  bc" :: Text)
-    , testCase "a%-3lc"   $ [fmt|a%2lc|]    "b"   @?= ("a bc" :: Text)
-    , testCase "a%-3Lc"   $ [fmt|a%5Lc|] (["b","d"] :: [LazyText.Text])
+    , testCase "a%-2lc"   $ [fmt|a%-3lc|]   "b"   @?= ("ab  c" :: Text)
+    , testCase "a%5Lc"   $ [fmt|a%5Lc|] (["b","d"] :: [LazyText.Text])
                                                   @?= ("a  b,dc" :: Text)
+
+    , testCase "foo%Tbaz" $ [fmt|foo%Tbaz|] bar @?= ("foobarbaz" :: String)
 
     , testCase "a%-3sc"   $ [fmt|n|]                @?= ("n" :: Text)
     , testCase "a%-3sc"   $ [fmt|\n|]               @?= ("\n" :: Text)
@@ -245,6 +250,9 @@ fmtTest =
     , testCase "%05.2f"  $ [fmtT|%05.2f|] (6.2 :: Double)  @?=  "06.20"
     , testCase "%-5.2f"  $ [fmtT|%-5.2f|] (6.2 :: Double)  @?=  "6.20 "
     , testCase "%.3f"    $ [fmtT|%.3f|]   (6.2 :: Double)  @?=  "6.200"
+
+    , testCase "%3n"     $ [fmtT|%3n|]    (6 :: Int)       @?=  "  6"
+    , testCase "%3n"     $ [fmtT|%3n|]    (6 :: Word8)     @?=  "  6"
 
     , testCase "%e"     $ [fmtT|%e|]       (1000000 :: Double)  @?=      "10e5"
     , testCase "%.2e"   $ [fmtT|%.2e|]     (1000000 :: Double)  @?=   "10.00e5"

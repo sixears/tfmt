@@ -21,3 +21,6 @@ default.nix
 ghc-mod.package-db-stack
 *.dyn_hi
 *.dyn_o
+default.nix.bak
+cabal.project.local
+dist-newstyle/

@@ -6,6 +6,7 @@
 {-# LANGUAGE TemplateHaskell      #-}
 {-# LANGUAGE TypeApplications     #-}
 {-# LANGUAGE TypeSynonymInstances #-}
+{-# LANGUAGE UnicodeSyntax        #-}
 {-# LANGUAGE ViewPatterns         #-}
 
 {- | Format Text or Strings, in a type-safe way, using Quasi Quotations.
@@ -24,7 +25,7 @@
     may get errors a bit like this:
 
     @
-      • Couldn't match expected type ‘Format (Integer -> Text) (Int -> t)’
+      • Couldn't match expected type ‘Format (Integer → Text) (Int → t)’
                   with actual type ‘[Char]’
       • In the first argument of ‘(%)’, namely
     @
@@ -79,6 +80,10 @@ import Formatting             ( Format, (%), (%.)
 import Formatting.Formatters  ( Buildable, bin, fixed, hex, int, left
                               , oct, right, shortest, shown, stext, text )
 
+-- number ------------------------------
+
+import Number  ( ToNum( toNumI ) )
+
 -- parsec ------------------------------
 
 import Text.Parsec.Char        ( char, digit, noneOf, oneOf, string )
@@ -96,10 +101,11 @@ import Language.Haskell.TH.Quote
 
 -- text --------------------------------
 
+import qualified  Data.Text               as  Text
 import qualified  Data.Text.Lazy          as  LazyText
-import qualified  Data.Text.Lazy.Builder  as LazyBuilder
+import qualified  Data.Text.Lazy.Builder  as  LazyBuilder
 
-import Data.Text  ( Text, dropWhileEnd, intercalate, pack, unpack )
+import Data.Text  ( Text, dropWhileEnd, pack, unpack )
 
 
 ------------------------------------------------------------
@@ -111,14 +117,14 @@ import Text.Fmt.Token  ( Token( Conversion, Str ) )
 -------------------------------------------------------------------------------
 
 -- | tokenize a string into strings & conversions
-tokens :: Text -> Either ParseError [Token]
+tokens ∷ Text → Either ParseError [Token]
 tokens s = concatTokens <$> parse (tokenP <* eof) (unpack s) s
 
 ----------------------------------------
 
 -- | squish consecutive Str together
 
-concatTokens :: [Token] -> [Token]
+concatTokens ∷ [Token] → [Token]
 concatTokens (Str s : Str s' : ts) = concatTokens (Str (s <> s') : ts)
 concatTokens (t : t' : ts)         = t : t' : ts
 concatTokens ts                    = ts
@@ -126,25 +132,25 @@ concatTokens ts                    = ts
 ----------------------------------------
 
 -- | parse a string into tokens
-tokenP :: Stream s m Char => ParsecT s u m [Token]
+tokenP ∷ Stream s m Char ⇒ ParsecT s u m [Token]
 tokenP = many (simpleStr <|> try escapePC <|> try escapeSlash <|> conversion)
 
 ----------------------------------------
 
 -- | parse a string intoa conversion specifier
 
-conversion :: Stream s m Char => ParsecT s u m Token
+conversion ∷ Stream s m Char ⇒ ParsecT s u m Token
 conversion =
   Conversion <$> (string "%" *> optionMaybe fill)
              <*> optionMaybe precision
-             <*> (oneOf "bdeflLnostTwxyY" <?> "valid conversion char")
+             <*> (oneOf "bdefIlLnostTwxyY" <?> "valid conversion char")
 
 ----------------------------------------
 
 -- | parser for the fill spec of a conversion (the -07 of "%-07s", for example)
-fill :: Stream s m Char => ParsecT s u m (Integer, Char)
+fill ∷ Stream s m Char ⇒ ParsecT s u m (Integer, Char)
 fill =
-  (\ a b c d -> (read (concat [a,[c],d]), b)) <$> option "" (string "-")
+  (\ a b c d → (read (concat [a,[c],d]), b)) <$> option "" (string "-")
                                               <*> option ' ' (char '0')
                                               <*> oneOf "123456789"
                                               <*> many digit
@@ -153,25 +159,25 @@ fill =
 
 -- | parse for the precision part of a conversion (.2 of "%3.2f", for example)
 
-precision :: Stream s m Char => ParsecT s u m Natural
+precision ∷ Stream s m Char ⇒ ParsecT s u m Natural
 precision = read <$> (char '.' *> many digit)
 
 ----------------------------------------
 
 -- | parser for an unadorned string (without any % chars)
-simpleStr :: Stream s m Char => ParsecT s u m Token
+simpleStr ∷ Stream s m Char ⇒ ParsecT s u m Token
 simpleStr = Str <$> many1 (noneOf "%\\")
 
 ----------------------------------------
 
 -- | parser for an escaped '%' (represented in the incoming string as "%%")
-escapePC :: Stream s m Char => ParsecT s u m Token
+escapePC ∷ Stream s m Char ⇒ ParsecT s u m Token
 escapePC = Str <$> const "%" <$> string "%%"
 
 ----------------------------------------
 
 -- | parser for slash escapes, e.g., \\, \n, \t
-escapeSlash :: Stream s m Char => ParsecT s u m Token
+escapeSlash ∷ Stream s m Char ⇒ ParsecT s u m Token
 escapeSlash = Str . decode <$> (char '\\' *> oneOf "nt\\")
               where decode 'n'  = "\n"
                     decode 't'  = "\t"
@@ -185,31 +191,31 @@ data ByteFmtBase = B_1000 | B_1024
   deriving Eq
 
 -- | try really hard to fit within 7 chars
-formatBytes :: (Buildable a, Integral a) => ByteFmtBase -> a -> Text
-formatBytes _ (toInteger -> 0) = "0"
+formatBytes ∷ (Buildable a, Integral a) ⇒ ByteFmtBase → a → Text
+formatBytes _ (toInteger → 0) = "0"
 formatBytes b bs =
     case b of
-      B_1000 -> go 1000 bs -- (byteSize bs)
-      B_1024 -> go 1024 bs -- (fromIntegral $ byteSize bs)
-    where go :: (Buildable b, Integral b) => Double -> b -> Text
+      B_1000 → go 1000 bs -- (byteSize bs)
+      B_1024 → go 1024 bs -- (fromIntegral $ byteSize bs)
+    where go ∷ (Buildable b, Integral b) ⇒ Double → b → Text
           go x bytes =
-            let ex :: Word8 = floor (logBase x $ fromIntegral bytes)
-                (pfx,exp) :: (Maybe Char, Word8)= case ex of
-                              0 -> (Nothing,  0)
-                              1 -> (Just 'k', 1)
-                              2 -> (Just 'M', 2)
-                              3 -> (Just 'G', 3)
-                              4 -> (Just 'T', 4)
-                              5 -> (Just 'P', 5)
-                              6 -> (Just 'E', 6)
-                              7 -> (Just 'Z', 7)
-                              _ -> (Just 'Y', 8)
+            let ex ∷ Word8 = floor (logBase x $ fromIntegral bytes)
+                (pfx,exp) ∷ (Maybe Char, Word8)= case ex of
+                              0 → (Nothing,  0)
+                              1 → (Just 'k', 1)
+                              2 → (Just 'M', 2)
+                              3 → (Just 'G', 3)
+                              4 → (Just 'T', 4)
+                              5 → (Just 'P', 5)
+                              6 → (Just 'E', 6)
+                              7 → (Just 'Z', 7)
+                              _ → (Just 'Y', 8)
                 formatB n = fixed n % Formatters.char % Formatters.string % "B"
                 i = if b == B_1024 then "i" else ""
              in case pfx of
-                 Nothing -> sformat (int % "B") bytes
-                 Just c  -> let mant = fromIntegral bytes / (x^exp)
-                                c_   = if b == B_1024 then toUpper c else c
+                 Nothing → sformat (int % "B") bytes
+                 Just c  → let mant = fromIntegral bytes / (x^exp)
+                               c_   = if b == B_1024 then toUpper c else c
                              in if mant < 10
                                 then -- [fmt|%3.2f%T%sB|]
                                      sformat (formatB 2) mant c_ i
@@ -224,30 +230,30 @@ formatBytes b bs =
 
 -- | parse a fmt, return an ExpQ that when spliced, takes arguments to pass
 --   to the formatter to provide a textlike thing (see `FormatTarget`)
-sprintf :: Text -> ExpQ
+sprintf ∷ Text → ExpQ
 sprintf = sprintf_ 'output
 
 -- | like `sprintf`, but always produces a String (to reduce scoped type
 --   variables)
-sprintfS :: Text -> ExpQ
+sprintfS ∷ Text → ExpQ
 sprintfS = sprintf_ 'formatToString
 
-sprintfT :: Text -> ExpQ
+sprintfT ∷ Text → ExpQ
 sprintfT = sprintf_ 'sformat
 
-sprintfL :: Text -> ExpQ
+sprintfL ∷ Text → ExpQ
 sprintfL = sprintf_ 'format
 
-sprintf_ :: Name -> Text -> ExpQ
+sprintf_ ∷ Name → Text → ExpQ
 sprintf_ fnam t =
   case tokens t of
-    Left  e    -> error $ show e
-    Right toks -> appE (varE fnam) $
+    Left  e    → error $ show e
+    Right toks → appE (varE fnam) $
                       foldr conjoin (litE $ stringL "") (fmap tokOp toks)
                   where conjoin = infixOp '(%)
 
--- | conversion token as formatter; e.g., %-3t => (left 3 ' ') %. stext
-tokOp :: Token -> ExpQ
+-- | conversion token as formatter; e.g., %-3t ⇒ (left 3 ' ') %. stext
+tokOp ∷ Token → ExpQ
 tokOp (Str s)                       = litE $ stringL s
 tokOp (Conversion Nothing p c)      = charOp c Nothing p
 tokOp (Conversion (Just (i,c)) p o) =
@@ -258,13 +264,13 @@ tokOp (Conversion (Just (i,c)) p o) =
 ----------------------------------------
 
 -- create a fill expression
-fillIt :: Name -> Integer -> Char -> ExpQ
+fillIt ∷ Name → Integer → Char → ExpQ
 fillIt direction width chr =
   appE (appE (varE direction) (litE (integerL width))) (litE $ charL chr)
 
--- | conversion fill; -x -> left, (+)x -> right
+-- | conversion fill; -x → left, (+)x → right
 
-fillOp :: (Integer,Char) -> ExpQ
+fillOp ∷ (Integer,Char) → ExpQ
 fillOp (i,c) | i < 0 = fillIt 'right (abs i) c
 fillOp (i,c) | i > 0 = fillIt 'left       i  c
 fillOp (_,_) = -- i == 0 : something's gone wrong!
@@ -272,15 +278,16 @@ fillOp (_,_) = -- i == 0 : something's gone wrong!
 
 ----------------------------------------
 
-toTextF :: Printable t => Format r (t -> r)
--- toTextF = later $ LazyBuilder.fromLazyText . toLazyText
+toTextF ∷ Printable t ⇒ Format r (t → r)
 toTextF = later $ LazyBuilder.fromText . toText
 
-toTextListF :: (Foldable f, Printable t) => Format r (f t -> r)
+toTextListF ∷ (Foldable f, Printable t) ⇒ Format r (f t → r)
 toTextListF =
-  later $ LazyBuilder.fromText . intercalate "," . fmap toText . toList
+  later $ LazyBuilder.fromText . Text.intercalate "," . fmap toText . toList
 
-toFormatBytes :: (Buildable a, Integral a) => ByteFmtBase -> Format r (a -> r)
+----------------------------------------
+
+toFormatBytes ∷ (Buildable a, Integral a) ⇒ ByteFmtBase → Format r (a → r)
 toFormatBytes b = later $ LazyBuilder.fromText . formatBytes b
 
 ----------------------------------------
@@ -301,9 +308,9 @@ toFormatBytes b = later $ LazyBuilder.fromText . formatBytes b
    Where noted below, some specifiers also allow a precision (after a 'decimal
    point').
 
-   [@L@] - A foldable of things, where the things are instances of Printable,
-           joined with ',', thus
-           @ (`Foldable` φ, Printable τ) => φ intercalate "," (fmap toText τ) @
+   [@L@] - A `Foldable` of things, where the things are instances of
+           `Printable`, joined with ',', thus
+           @ (`Foldable` φ, Printable τ) ⇒ φ intercalate "," (fmap toText τ) @
 
    [@l@] - LazyText `LazyText.Text`
 
@@ -311,83 +318,83 @@ toFormatBytes b = later $ LazyBuilder.fromText . formatBytes b
 
    [@t@] - StrictText `Text`
 
-   [@T@] - `Printable` @ τ => toText τ @
+   [@T@] - `Printable` @ τ ⇒ toText τ @
 
-   [@w@] - `Show` @ ω => show ω @
+   [@w@] - `Show` @ ω ⇒ show ω @
 
-   [@d@] - `Integral` α => render as denary
+   [@d@] - `Integral` α ⇒ render as denary
 
-   [@n@] - `Natural` α => render as denary
+   [@n@] - `ToNum` α    ⇒ render as denary
 
-   [@x@] - `Integral` α => render as hexadenary
+   [@x@] - `Integral` α ⇒ render as hexadenary
 
-   [@b@] - `Integral` α => render as binary
+   [@b@] - `Integral` α ⇒ render as binary
 
-   [@o@] - `Integral` α => render as octal
+   [@o@] - `Integral` α ⇒ render as octal
 
-   [@f@] - `Real` α => Render as decimal with as many decimal places as
+   [@f@] - `Real` α ⇒ Render as decimal with as many decimal places as
                        necessary.  Beware floating-point representation which
                        may give lengthy results.
 
-   [@f.n@] - `Real` α => Render as decimal with precisely /n/ decimal places.
-                         Will round to the nearest decimal place as appropriate.
+   [@f.n@] - `Real` α ⇒ Render as decimal with precisely /n/ decimal places.
+                        Will round to the nearest decimal place as appropriate.
 
-   [@e@] - `Real` α => Render as decimal in scientific notation with 0 decimal
+   [@e@] - `Real` α ⇒ Render as decimal in scientific notation with 0 decimal
                        places in the mantissa.
 
-                       >>> [fmtT|[%-e]|] (3.14 :: Float)
+                       >>> [fmtT|[%-e]|] (3.14 ∷ Float)
                        "[3e0]"
 
                        Note that the padding width, if provided, applies to the
                        whole representation; thus the below adds one space
                        because "3e-1" is 4 characters.
 
-                       >>> [fmtT|[%5e]|] (0.314 :: Float)
+                       >>> [fmtT|[%5e]|] (0.314 ∷ Float)
                        "[ 3e-1]"
 
 
-   [@e.n@] - `Real` α => Render as decimal in scientific notation with precisely
+   [@e.n@] - `Real` α ⇒ Render as decimal in scientific notation with precisely
                          /n/ decimal places in the mantissa.
 
-                         >>> [fmtT|[%-.1e]|] (0.314 :: Float)
+                         >>> [fmtT|[%-.1e]|] (0.314 ∷ Float)
                          "[3.1e-1]"
 
-   [@y@] - `Integral` α => Render as bytes, with a 2^10 multiplier.  This tries
+   [@y@] - `Integral` α ⇒ Render as bytes, with a 2^10 multiplier.  This tries
                            to fit the value into 7 characters.
 
-                           >>> [fmtT|%y|] (1024^(2::Int) :: Integer)
+                           >>> [fmtT|%y|] (1024^(2∷Int) ∷ Integer)
                            "1.05MB"
 
-                           >>> [fmtT|%y|] (1024 :: Integer)
+                           >>> [fmtT|%y|] (1024 ∷ Integer)
                            "1.02kB"
 
-                           >>> [fmtT|%y|] (999 :: Integer)
+                           >>> [fmtT|%y|] (999 ∷ Integer)
                            "999B"
 
 
-   [@Y@] - `Integral` α => Render as bytes, with a 2^10 multiplier.  This tries
+   [@Y@] - `Integral` α ⇒ Render as bytes, with a 2^10 multiplier.  This tries
                            to fit the value into 7 characters.
 
-                           >>> [fmtT|%Y|] (999 :: Integer)
+                           >>> [fmtT|%Y|] (999 ∷ Integer)
                            "999B"
 
-                           >>> [fmtT|%Y|] (1024*1023 :: Integer)
+                           >>> [fmtT|%Y|] (1024*1023 ∷ Integer)
                            "1023KiB"
 
-                           >>> [fmtT|%Y|] (1024*1024 :: Integer)
+                           >>> [fmtT|%Y|] (1024*1024 ∷ Integer)
                            "1.00MiB"
 
 -}
 
-charOpNoPrecision :: ExpQ -> Char -> Maybe Natural -> ExpQ
+charOpNoPrecision ∷ ExpQ → Char → Maybe Natural → ExpQ
 charOpNoPrecision f _ Nothing  = f
 charOpNoPrecision _ c (Just p) = error $ "conversion char '" <> [c]
                                       <> "' does not admit precision ("
                                       <> show p <> ")"
 
--- | conversion character as formatter; e.g., 't' -> stext; takes precision
+-- | conversion character as formatter; e.g., 't' → stext; takes precision
 --   too, lest that affect the conversion
-charOp :: Char -> Maybe Integer -> Maybe Natural -> ExpQ
+charOp ∷ Char → Maybe Integer → Maybe Natural → ExpQ
 
 charOp c@'L' _ p = charOpNoPrecision (varE 'toTextListF) c p
 charOp c@'l' _ p = charOpNoPrecision (varE 'text) c p
@@ -400,7 +407,7 @@ charOp c@'d' _ p = charOpNoPrecision (varE 'int) c p
 charOp c@'x' _ p = charOpNoPrecision (varE 'hex) c p
 charOp c@'b' _ p = charOpNoPrecision (varE 'bin) c p
 charOp c@'o' _ p = charOpNoPrecision (varE 'oct) c p
-charOp c@'n' _ p = charOpNoPrecision (varE 'nat) c p
+charOp c@'n' _ p = charOpNoPrecision (varE 'tonum) c p
 
 charOp 'f' _ Nothing  = varE 'floatmin
 charOp 'f' _ (Just i) = appE (varE 'fixed) (litE (integerL $ fromIntegral i))
@@ -414,29 +421,29 @@ charOp 'Y' _ (Just _) = error "Y format does not handle precision"
 
 charOp x _ _ = error $ "bad conversion char'" <> [x] <> "'"
 
-floatmin :: Real α => Format r (α -> r)
-floatmin = let dropper = dropWhileEnd (`elem` (".0" :: String))
+floatmin ∷ Real α ⇒ Format r (α → r)
+floatmin = let dropper = dropWhileEnd (`elem` (".0" ∷ String))
             in later $ LazyBuilder.fromText . dropper . sformat shortest
 
-nat :: Format r (Natural -> r)
-nat = mapf (fromIntegral :: Natural -> Integer) int
+tonum ∷ ToNum α ⇒ Format r (α → r)
+tonum = mapf toNumI int
 
-expt ::  RealFloat α => Int -> Format r (α -> r)
-expt i = later (\ f ->
-  let (m,e :: Integer) = decompose f
+expt ∷  RealFloat α ⇒ Int → Format r (α → r)
+expt i = later (\ f →
+  let (m,e ∷ Integer) = decompose f
    in LazyBuilder.fromText $ (sformat $ (fixed i % "e" % int)) m e)
 
 
 -- | decompose a Real value into "engineering" notation; a mantissa between
 --   (-10,10) and an exponent, as a power of 10
-decompose :: (RealFloat α, Integral β) => α -> (Double, β)
+decompose ∷ (RealFloat α, Integral β) ⇒ α → (Double, β)
 decompose val = let (mant2,ex2) = decodeFloat val
-                    mant2d :: Double = fromIntegral(abs mant2)
-                    ex2d   :: Double = fromIntegral ex2
-                    res    :: Double = log10 mant2d + log10 (2**ex2d)
+                    mant2d ∷ Double = fromIntegral(abs mant2)
+                    ex2d   ∷ Double = fromIntegral ex2
+                    res    ∷ Double = log10 mant2d + log10 (2**ex2d)
                     ex10             = floor res
-                    log10  :: Double -> Double = logBase 10
-                    mant10 :: Double = 10**(res - (fromIntegral ex10::Double))
+                    log10  ∷ Double → Double = logBase 10
+                    mant10 ∷ Double = 10**(res - (fromIntegral ex10∷Double))
                  in if mant2 > 0
                     then (mant10,ex10)
                     else (-mant10,ex10) 
@@ -444,7 +451,7 @@ decompose val = let (mant2,ex2) = decodeFloat val
 ----------------------------------------
 
 -- | infix a function between two values
-infixOp :: Name -> ExpQ -> ExpQ -> ExpQ
+infixOp ∷ Name → ExpQ → ExpQ → ExpQ
 infixOp op l r = infixE (Just l) (varE op) (Just r)
 
 ----------------------------------------
@@ -452,16 +459,16 @@ infixOp op l r = infixE (Just l) (varE op) (Just r)
 -- | Generate an instance of FormatTarget (e.g., Strict or Lazy Text, or String)
 --   from a format and set of values.
 --
---   >>> ([fmt|foo %s|] ("baz" :: String)) :: Text
+--   >>> ([fmt|foo %s|] ("baz" ∷ String)) ∷ Text
 --   "foo baz"
 --
---   >>> :t [fmtS|bar %t|] ("quux" :: Text)
---   [fmtS|bar %t|] ("quux" :: Text) :: [Char]
+--   >>> :t [fmtS|bar %t|] ("quux" ∷ Text)
+--   [fmtS|bar %t|] ("quux" ∷ Text) ∷ [Char]
 --
---   >>> [fmtS|bar %t|] ("quux" :: Text)
+--   >>> [fmtS|bar %t|] ("quux" ∷ Text)
 --  "bar quux"
 
-fmt :: QuasiQuoter
+fmt ∷ QuasiQuoter
 fmt =  QuasiQuoter { quoteDec  = error "not implemented"
                    , quoteType = error "not implemented"
                    , quotePat  = error "not implemented"
@@ -471,7 +478,7 @@ fmt =  QuasiQuoter { quoteDec  = error "not implemented"
 --------------------
 
 -- | like `fmt`, but produces specifically a String
-fmtS :: QuasiQuoter
+fmtS ∷ QuasiQuoter
 fmtS =  QuasiQuoter { quoteDec  = error "not implemented"
                     , quoteType = error "not implemented"
                     , quotePat  = error "not implemented"
@@ -481,7 +488,7 @@ fmtS =  QuasiQuoter { quoteDec  = error "not implemented"
 --------------------
 
 -- | like `fmt`, but produces specifically a Lazy Text
-fmtL :: QuasiQuoter
+fmtL ∷ QuasiQuoter
 fmtL =  QuasiQuoter { quoteDec  = error "not implemented"
                     , quoteType = error "not implemented"
                     , quotePat  = error "not implemented"
@@ -491,7 +498,7 @@ fmtL =  QuasiQuoter { quoteDec  = error "not implemented"
 --------------------
 
 -- | like `fmt`, but produces specifically a Strict Text
-fmtT :: QuasiQuoter
+fmtT ∷ QuasiQuoter
 fmtT =  QuasiQuoter { quoteDec  = error "not implemented"
                     , quoteType = error "not implemented"
                     , quotePat  = error "not implemented"
@@ -503,7 +510,7 @@ fmtT =  QuasiQuoter { quoteDec  = error "not implemented"
 -- | possible target of `fmt` or similar.
 
 class FormatTarget t where
-  output :: Format t a -> a
+  output ∷ Format t a → a
 
 instance FormatTarget Text where
   output = sformat
