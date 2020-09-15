@@ -1,3 +1,7 @@
+0.2.3.0 2019-09-15
+==================
+- add 'z', 'Z', 'k', 'K'
+
 0.2.1.0 2018-10-12
 ==================
 - remove use of expt from Formatting.Formatters (because it is removed in

@@ -24,6 +24,7 @@ import Data.Maybe       ( Maybe( Just, Nothing ) )
 import Data.Monoid      ( (<>) )
 import Data.String      ( String, unlines )
 import Data.Word        ( Word8 )
+import GHC.Stack        ( SrcLoc( SrcLoc ), fromCallSiteList )
 import Numeric.Natural  ( Natural )
 import System.IO        ( IO )
 import Text.Show        ( Show, show )
@@ -48,11 +49,15 @@ import Test.Tasty.HUnit  ( Assertion, (@?=), assertBool, testCase )
 
 import qualified  Data.Text.Lazy  as  LazyText
 
-import Data.Text  ( Text, unpack )
+import Data.Text  ( Text, intercalate, unpack )
 
 -- text-printer ------------------------
 
 import qualified  Text.Printer  as  P
+
+-- time --------------------------------
+
+import Data.Time.Clock.POSIX  ( posixSecondsToUTCTime )
 
 ------------------------------------------------------------
 --                     local imports                      --
@@ -92,8 +97,8 @@ convTest :: TestTree
 convTest =
   testGroup "conversion" $
     let testConv t expect = testCase t $ parse conversion t t @?= Right expect
-      in [ testConv "%t"      (Conversion Nothing Nothing 't')
-         , testConv "%-03.2f" (Conversion (Just (-3,'0')) (Just 2) 'f')
+      in [ testConv "%t"      (Conversion Nothing Nothing Nothing 't')
+         , testConv "%-03.2f" (Conversion (Just (-3,'0')) (Just 2) Nothing 'f')
          ]
 
 formatBytesTest :: TestTree
@@ -156,15 +161,20 @@ tokensTest =
          , testTokens "%\t%t"            (Left "unexpected \"\\t\"")
          , testTokens "%t%a"             (Left "unexpected \"a\"")
          , testTokens "my %ttoken"
-             (Right [ Str "my ", Conversion Nothing Nothing 't', Str "token" ])
+             (Right [ Str "my ", Conversion Nothing Nothing Nothing 't'
+                    , Str "token" ])
          , testTokens "%7t token"
-             (Right [ Conversion (Just (7, ' ')) Nothing 't', Str " token" ])
+             (Right [ Conversion (Just (7, ' ')) Nothing Nothing 't'
+                    , Str " token" ])
          , testTokens "%-7t%%"
-             (Right [ Conversion (Just (-7, ' ')) Nothing 't', Str "%" ])
+             (Right [ Conversion (Just (-7, ' ')) Nothing Nothing 't'
+                    , Str "%" ])
          , testTokens "%07t token"
-             (Right [ Conversion (Just (7, '0')) Nothing 't', Str " token" ])
+             (Right [ Conversion (Just (7, '0')) Nothing Nothing 't'
+                    , Str " token" ])
          , testTokens "%-07t%%"
-             (Right [ Conversion (Just (-7, '0')) Nothing 't', Str "%" ])
+             (Right [ Conversion (Just (-7, '0')) Nothing Nothing 't'
+                    , Str "%" ])
          ]
 
 sprintfTest :: TestTree
@@ -188,6 +198,9 @@ fmtTest =
   let (^^) :: Int -> Int -> Int
       x ^^ y = x ^ y
       bar = "bar" ∷ String
+      dayOne = posixSecondsToUTCTime 94755600
+      cs = fromCallSiteList [("foo", SrcLoc "a" "b" "c" 8 13 21 34),
+                             ("bar", SrcLoc "x" "y" "z" 55 89 144 233)]
    in testGroup "fmt"
     [ testCase "-empty-"  $ [fmt||]               @?= ("" :: Text)
 
@@ -266,12 +279,12 @@ fmtTest =
     , testCase "fmtT"        $ [fmtT|a%03tc|] "b" @?= ("a00bc" :: Text)
     , testCase "as strict text" $ [fmtT|a%03tc|] "b" @?= "a00bc"
 
-    , testCase "%d"      $ [fmtT|%d|]  (  7  :: Int) @?= ("7"   :: Text)
-    , testCase "%d (-)"  $ [fmtT|%d|]  ((-7) :: Int) @?= ("-7"  :: Text)
-    , testCase "%dC"     $ [fmtT|%dC|] (  7  :: Int) @?= ("7C"  :: Text)
-    , testCase "F%d"     $ [fmtT|F%d|] (  7  :: Int) @?= ("F7"  :: Text)
-    , testCase "-%d"     $ [fmtT|-%d|] (  7  :: Int) @?= ("-7"  :: Text)
-    , testCase "-%d"     $ [fmtT|-%d|] ((-7) :: Int) @?= ("--7" :: Text)
+    , testCase "%d"      $ [fmtT|%%%d|] (  7  :: Int) @?= ("%7"   :: Text)
+    , testCase "%d (-)"  $ [fmtT|%d|]   ((-7) :: Int) @?= ("-7"  :: Text)
+    , testCase "%dC"     $ [fmtT|%dC|]  (  7  :: Int) @?= ("7C"  :: Text)
+    , testCase "F%d"     $ [fmtT|F%d|]  (  7  :: Int) @?= ("F7"  :: Text)
+    , testCase "-%d"     $ [fmtT|-%d|]  (  7  :: Int) @?= ("-7"  :: Text)
+    , testCase "-%d"     $ [fmtT|-%d|]  ((-7) :: Int) @?= ("--7" :: Text)
 
     , testCase "0 b" $ [fmt|%Y|] (0 :: Int) @?= ("0" :: Text)
     , testCase "0 B" $ [fmt|%y|] (0 :: Int) @?= ("0" :: Text)
@@ -290,6 +303,23 @@ fmtTest =
     , testCase "1073741824 b" $ [fmt|%7y|] (1024^^3) @?= (" 1.07GB" :: Text)
     , testCase "1073741824 B" $ [fmt|%Y|] (1024^^3) @?= ("1.00GiB" :: Text)
     , testCase "1073741824 B" $ [fmt|%Y|] (1024^^3) @?= ("1.00GiB" :: Text)
+
+    , testCase "1973-01-01-Z17:00:00" $
+          [fmtT|%z|] dayOne @?= "1973-01-01Z17:00:00"
+    , testCase "1973-01-01-Z17:00:00 Mon" $
+          [fmtT|%Z|] dayOne @?= "1973-01-01Z17:00:00 Mon"
+
+    , testCase "1973-01-01-Z17:00:00" $
+          [fmtT|%k|] cs @?= "«c#8»"
+    , testCase "1973-01-01-Z17:00:00 Mon" $
+          [fmtT|%K|] cs @?= intercalate "\n" [ "foo (a:b:c 8:13-21:34)"
+                                             , "bar (x:y:z 55:89-144:233)" ]
+    , testCase "1973-01-01-Z17:00:00 Mon" $
+          [fmtT|%26K|] cs @?= intercalate "\n" [ "    foo (a:b:c 8:13-21:34)"
+                                               , " bar (x:y:z 55:89-144:233)" ]
+    , testCase "1973-01-01-Z17:00:00 Mon" $
+          [fmtT|%-26K|] cs @?= intercalate "\n" [ "foo (a:b:c 8:13-21:34)    "
+                                                , "bar (x:y:z 55:89-144:233) " ]
     ]
 
 -- that's all, folks! ---------------------------------------------------------
