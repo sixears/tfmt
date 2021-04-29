@@ -24,7 +24,7 @@ import Data.Maybe       ( Maybe( Just, Nothing ) )
 import Data.Monoid      ( (<>) )
 import Data.String      ( String, unlines )
 import Data.Word        ( Word8 )
-import GHC.Stack        ( SrcLoc( SrcLoc ), fromCallSiteList )
+import GHC.Stack        ( CallStack, SrcLoc( SrcLoc ), fromCallSiteList )
 import Numeric.Natural  ( Natural )
 import System.IO        ( IO )
 import Text.Show        ( Show, show )
@@ -193,14 +193,16 @@ sprintfTest =
     , testCase "-%d"     $ $( sprintf "-%d" ) ((-7) :: Int) @?= ("--7" :: Text)
     ]
 
+cs ∷ CallStack
+cs = fromCallSiteList [ ("foo", SrcLoc "a" "b" "c" 8 13 21 34)
+                      , ("bar", SrcLoc "x" "y" "z" 55 89 55 233) ]
+
 fmtTest :: TestTree
 fmtTest =
   let (^^) :: Int -> Int -> Int
       x ^^ y = x ^ y
       bar = "bar" ∷ String
       dayOne = posixSecondsToUTCTime 94755600
-      cs = fromCallSiteList [("foo", SrcLoc "a" "b" "c" 8 13 21 34),
-                             ("bar", SrcLoc "x" "y" "z" 55 89 144 233)]
    in testGroup "fmt"
     [ testCase "-empty-"  $ [fmt||]               @?= ("" :: Text)
 
@@ -310,16 +312,16 @@ fmtTest =
           [fmtT|%Z|] dayOne @?= "1973-01-01Z17:00:00 Mon"
 
     , testCase "1973-01-01-Z17:00:00" $
-          [fmtT|%k|] cs @?= "«c#8»"
+          [fmtT|%k|] cs @?= "«foo» (a:b:c#8[13]→21[34])"
     , testCase "1973-01-01-Z17:00:00 Mon" $
-          [fmtT|%K|] cs @?= intercalate "\n" [ "foo (a:b:c 8:13-21:34)"
-                                             , "bar (x:y:z 55:89-144:233)" ]
+          [fmtT|%K|] cs @?= intercalate "\n" [ "«foo» (a:b:c#8[13]→21[34])"
+                                             , "«bar» (x:y:z#55[89→233])" ]
     , testCase "1973-01-01-Z17:00:00 Mon" $
-          [fmtT|%26K|] cs @?= intercalate "\n" [ "    foo (a:b:c 8:13-21:34)"
-                                               , " bar (x:y:z 55:89-144:233)" ]
+          [fmtT|%28K|] cs @?= intercalate "\n" [ "  «foo» (a:b:c#8[13]→21[34])"
+                                               , "    «bar» (x:y:z#55[89→233])"]
     , testCase "1973-01-01-Z17:00:00 Mon" $
-          [fmtT|%-26K|] cs @?= intercalate "\n" [ "foo (a:b:c 8:13-21:34)    "
-                                                , "bar (x:y:z 55:89-144:233) " ]
+          [fmtT|%-26K|] cs @?= intercalate "\n" [ "«foo» (a:b:c#8[13]→21[34])"
+                                                , "«bar» (x:y:z#55[89→233])  " ]
     ]
 
 -- that's all, folks! ---------------------------------------------------------

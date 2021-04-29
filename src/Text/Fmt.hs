@@ -35,8 +35,7 @@ module Text.Fmt
 
     -- $formatting
 
-    ByteFmtBase(..), FormatTarget(..), ToCallStack( toCallStack )
-  , ToUTCTimeY( toUTCTimeY )
+    ByteFmtBase(..), FormatTarget(..), ToUTCTimeY( toUTCTimeY )
   , fmt, fmtS, fmtL, fmtT, formatBytes, formatUTCY, formatUTCYDoW
   -- for testing only
   , Token(..), conversion, fill, sprintf, tokens )
@@ -59,11 +58,9 @@ import Data.Function        ( ($), const, id )
 import Data.Functor         ( fmap )
 import Data.List            ( concat, elem, intercalate )
 import Data.Maybe           ( Maybe( Just, Nothing ) )
-import Data.Monoid          ( mconcat )
 import Data.Ord             ( (<), (>) )
-import Data.String          ( String )
 import Data.Word            ( Word8 )
-import GHC.Stack            ( CallStack, SrcLoc
+import GHC.Stack            ( SrcLoc
                             , getCallStack, srcLocFile, srcLocModule
                             , srcLocPackage, srcLocEndCol, srcLocEndLine
                             , srcLocStartCol, srcLocStartLine
@@ -92,11 +89,23 @@ import Formatting             ( Format, (%), (%.)
 import Formatting.Formatters  ( bin, fixed, hex, int, oct, shortest, shown
                               , stext, text )
 
+-- has-callstack -----------------------
+
+import HasCallstack  ( HasCallstack( callstack ) )
+
+-- lens --------------------------------
+
+import Control.Lens  ( view )
+
 -- more-unicode ------------------------
 
 import Data.MoreUnicode.Applicative  ( (∤), (⋪), (⋫), (⊵) )
 import Data.MoreUnicode.Functor      ( (⊳) )
+import Data.MoreUnicode.Lens         ( (⊣) )
+import Data.MoreUnicode.Maybe        ( 𝕄 )
 import Data.MoreUnicode.Monoid       ( ю )
+import Data.MoreUnicode.String       ( 𝕊 )
+import Data.MoreUnicode.Text         ( 𝕋 )
 
 -- number ------------------------------
 
@@ -111,7 +120,11 @@ import Text.Parsec.Prim        ( (<?>), parse, try )
 
 -- parsec-plus -------------------------
 
-import ParsecPlusBase  ( Parser, boundedDoubledChars )
+import ParsecPlusBase  ( Parser )
+
+-- parsen-plus -------------------------
+
+import ParserPlus  ( boundedDoubledChars )
 
 -- template-haskell --------------------
 
@@ -127,7 +140,7 @@ import qualified  Data.Text               as  Text
 import qualified  Data.Text.Lazy          as  LazyText
 import qualified  Data.Text.Lazy.Builder  as  LazyBuilder
 
-import Data.Text  ( Text, dropWhileEnd, pack, unpack )
+import Data.Text  ( dropWhileEnd, pack, unpack )
 
 -- text-format -------------------------
 
@@ -147,7 +160,7 @@ import Text.Fmt.Token  ( Token( Conversion, Str ) )
 -------------------------------------------------------------------------------
 
 -- | tokenize a string into strings & conversions
-tokens ∷ Text → Either ParseError [Token]
+tokens ∷ 𝕋 → Either ParseError [Token]
 tokens s = concatTokens ⊳ parse (tokenP ⋪ eof) (unpack s) s
 
 ----------------------------------------
@@ -221,16 +234,16 @@ data ByteFmtBase = B_1000 | B_1024
   deriving Eq
 
 -- | try really hard to fit within 7 chars
-formatBytes ∷ (Formatters.Buildable a, Integral a) ⇒ ByteFmtBase → a → Text
+formatBytes ∷ (Formatters.Buildable a, Integral a) ⇒ ByteFmtBase → a → 𝕋
 formatBytes _ (toInteger → 0) = "0"
 formatBytes b bs =
     case b of
       B_1000 → go 1000 bs -- (byteSize bs)
       B_1024 → go 1024 bs -- (fromIntegral $ byteSize bs)
-    where go ∷ (Formatters.Buildable b, Integral b) ⇒ Double → b → Text
+    where go ∷ (Formatters.Buildable b, Integral b) ⇒ Double → b → 𝕋
           go x bytes =
             let ex ∷ Word8 = floor (logBase x $ fromIntegral bytes)
-                (pfx,exp) ∷ (Maybe Char, Word8)= case ex of
+                (pfx,exp) ∷ (𝕄 Char, Word8)= case ex of
                               0 → (Nothing,  0)
                               1 → (Just 'k', 1)
                               2 → (Just 'M', 2)
@@ -258,24 +271,24 @@ formatBytes b bs =
 ----------------------------------------
 
 class ToUTCTimeY α where
-  toUTCTimeY ∷ α → Maybe UTCTime
+  toUTCTimeY ∷ α → 𝕄 UTCTime
 
 instance ToUTCTimeY UTCTime where
   toUTCTimeY = Just
 
-instance ToUTCTimeY (Maybe UTCTime) where
+instance ToUTCTimeY (𝕄 UTCTime) where
   toUTCTimeY = id
 
 {- | Format a (Maybe UTCTime), in almost-ISO8601-without-fractional-seconds
      (always in Zulu). -}
-formatUTCY ∷ ToUTCTimeY α ⇒ α → Text
+formatUTCY ∷ ToUTCTimeY α ⇒ α → 𝕋
 formatUTCY mt = case toUTCTimeY mt of
                   Just t  → pack $ formatTime defaultTimeLocale "%FZ%T" t
                   Nothing → "-------------------"
 
 {- | Format a (Maybe UTCTime), in ISO8601-without-fractional-seconds (always in
      Zulu), with a leading 3-letter day-of-week. -}
-formatUTCYDoW ∷ ToUTCTimeY α ⇒ α → Text
+formatUTCYDoW ∷ ToUTCTimeY α ⇒ α → 𝕋
 formatUTCYDoW mt = case toUTCTimeY mt of
                      Just t  → pack $ formatTime defaultTimeLocale "%FZ%T %a" t
                      Nothing → "-----------------------"
@@ -288,66 +301,66 @@ toFormatUTCDoW = later $ LazyBuilder.fromText ∘ formatUTCYDoW
 
 ----------------------------------------
 
-class ToCallStack α where
-  toCallStack ∷ α → CallStack
+renderStackLine ∷ (𝕊,SrcLoc) → 𝕊
+renderStackLine (fname,loc) = let to x y = x ⊕ "→" ⊕ y
+                                  toS x y = to (show x) (show y)
+                                  col l c = l ⊕ "[" ⊕ c ⊕ "]"
+                                  colS l c = col (show l) (show c)
+                                  pkg = srcLocPackage   loc
+                                  mod = srcLocModule    loc
+                                  fn  = srcLocFile      loc
+                                  sc  = srcLocStartCol  loc
+                                  sl  = srcLocStartLine loc
+                                  ec  = srcLocEndCol    loc
+                                  el  = srcLocEndLine   loc
+                                  st  = colS sl sc
+                                  ed  = colS el ec
+                                  src = ю [ pkg, ":", mod, ":" ⊕ fn ]
+                                  lc = if sl ≡ el
+                                       then ю [ col (show sl) (sc `toS` ec) ]
+                                       else st `to` ed
+                               in ю [ "«", fname, "»", " (", src, "#", lc, ")" ]
 
-instance ToCallStack CallStack where
-  toCallStack = id
+----------------------------------------
 
-formatStackHead ∷ ToCallStack α ⇒ α → String
-formatStackHead a = case getCallStack (toCallStack a) of
+formatStackHead ∷ HasCallstack α ⇒ α → 𝕊
+formatStackHead a = case getCallStack (a ⊣ callstack) of
                       []          → "«NO STACK»"
-                      ((_,loc):_) → mconcat [ "«"
-                                            , srcLocFile loc
-                                            , "#"
-                                            , show $ srcLocStartLine loc
-                                            , "»"
-                                            ]
+                      (loc:_) → renderStackLine loc
 
-toFormatStackHead ∷ ToCallStack α ⇒ Format ρ (α → ρ)
+toFormatStackHead ∷ HasCallstack α ⇒ Format ρ (α → ρ)
 toFormatStackHead = later $ LazyBuilder.fromString ∘ formatStackHead
 
 ----------------------------------------
 
-formatCallStack ∷ ToCallStack α ⇒ α → String
-formatCallStack (getCallStack ∘ toCallStack → ss) =
-  let renderStackLine ∷ (String,SrcLoc) → String
-      renderStackLine (fname,loc) = let pkg = srcLocPackage   loc
-                                        mod = srcLocModule    loc
-                                        fn  = srcLocFile      loc
-                                        sc  = srcLocStartCol  loc
-                                        sl  = srcLocStartLine loc
-                                        ec  = srcLocEndCol    loc
-                                        el  = srcLocEndLine   loc
-                                        st  = show sl ⊕ ":" ⊕ show sc
-                                        ed  = show el ⊕ ":" ⊕ show ec
-                                        src = ю [ pkg, ":", mod, ":" ⊕ fn ]
-                                        lc = st ⊕ "-" ⊕ ed
-                                     in ю [ fname, " (", src, " ", lc, ")" ]
-   in intercalate "\n" $ renderStackLine ⊳ ss
+formatCallStack ∷ HasCallstack α ⇒ α → 𝕊
+formatCallStack (getCallStack ∘ view callstack → ss) =
+  case ss of
+    [] → "«NO STACK»"
+    _  → intercalate "\n" $ renderStackLine ⊳ ss
 
-toFormatCallStack ∷ ToCallStack α ⇒ Format ρ (α → ρ)
+toFormatCallStack ∷ HasCallstack α ⇒ Format ρ (α → ρ)
 toFormatCallStack = later $ LazyBuilder.fromString ∘ formatCallStack
 
 ----------------------------------------
 
 -- | parse a fmt, return an ExpQ that when spliced, takes arguments to pass
 --   to the formatter to provide a textlike thing (see `FormatTarget`)
-sprintf ∷ Text → ExpQ
+sprintf ∷ 𝕋 → ExpQ
 sprintf = sprintf_ 'output
 
 -- | like `sprintf`, but always produces a String (to reduce scoped type
 --   variables)
-sprintfS ∷ Text → ExpQ
+sprintfS ∷ 𝕋 → ExpQ
 sprintfS = sprintf_ 'formatToString
 
-sprintfT ∷ Text → ExpQ
+sprintfT ∷ 𝕋 → ExpQ
 sprintfT = sprintf_ 'sformat
 
-sprintfL ∷ Text → ExpQ
+sprintfL ∷ 𝕋 → ExpQ
 sprintfL = sprintf_ 'format
 
-sprintf_ ∷ Name → Text → ExpQ
+sprintf_ ∷ Name → 𝕋 → ExpQ
 sprintf_ fnam t =
   case tokens t of
     Left  e    → error $ show e
@@ -536,7 +549,7 @@ toFormatBytes b = later $ LazyBuilder.fromText ∘ formatBytes b
 -}
 
 {- | Character op: non-Nothing precision causes error. -}
-charOpNoPrecision ∷ ExpQ → Char → Maybe Natural → Maybe Text → ExpQ
+charOpNoPrecision ∷ ExpQ → Char → 𝕄 Natural → 𝕄 𝕋 → ExpQ
 charOpNoPrecision f _ Nothing Nothing = f
 charOpNoPrecision _ chr (Just prec) Nothing =
   error $ ю [ "conversion char '", [chr], "' does not admit precision ("
@@ -551,9 +564,9 @@ charOpNoPrecision _ chr (Just prec) (Just t) =
 {- | Conversion character as formatter; e.g., 't' → stext; takes fill width &
      precision too, lest that affect the conversion. -}
 charOp ∷ Char          -- ^ conversion character (typically for errmsgs)
-       → Maybe Integer -- ^ fill width
-       → Maybe Natural -- ^ precision
-       → Maybe Text    -- ^ optional text (between {}) (unused in charOp)
+       → 𝕄 Integer -- ^ fill width
+       → 𝕄 Natural -- ^ precision
+       → 𝕄 𝕋    -- ^ optional text (between {}) (unused in charOp)
        → ExpQ
 
 -- list (foldable), joined with ','
@@ -594,7 +607,7 @@ charOp c@'K' _ p t = charOpNoPrecision (varE 'toFormatCallStack) c p t
 charOp x _ _ _ = error $ "bad conversion char'" ⊕ [x] ⊕ "'"
 
 floatmin ∷ Real α ⇒ Format r (α → r)
-floatmin = let dropper = dropWhileEnd (`elem` (".0" ∷ String))
+floatmin = let dropper = dropWhileEnd (`elem` (".0" ∷ 𝕊))
             in later $ LazyBuilder.fromText ∘ dropper ∘ sformat shortest
 
 tonum ∷ ToNum α ⇒ Format r (α → r)
@@ -684,13 +697,13 @@ fmtT =  QuasiQuoter { quoteDec  = error "not implemented"
 class FormatTarget t where
   output ∷ Format t a → a
 
-instance FormatTarget Text where
+instance FormatTarget 𝕋 where
   output = sformat
 
 instance FormatTarget LazyText.Text where
   output = format
 
-instance FormatTarget String where
+instance FormatTarget 𝕊 where
   output = formatToString
 
 -- that's all, folks! ---------------------------------------------------------

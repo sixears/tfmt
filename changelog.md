@@ -1,3 +1,8 @@
+0.2.4.0 2021-04-29
+==================
+- use has-callstack::HasCallstack rather than Text.Fmt::ToCallStack.
+- %k uses same format as %K (but only for the top line)
+
 0.2.3.0 2019-09-15
 ==================
 - add 'z', 'Z', 'k', 'K'

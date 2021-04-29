@@ -10,7 +10,7 @@ name:                tfmt
 -- PVP summary:      +-+------- breaking API changes
 --                   | | +----- non-breaking API additions
 --                   | | | +--- code changes with no API change
-version:             0.2.3.0
+version:             0.2.4.0
 
 -- A short (one-line) description of the package.
 synopsis:            type-safe text/string formatting with a simple interface
@@ -58,13 +58,15 @@ library
   -- other-extensions:
 
   -- Other library packages from which modules are imported.
-  build-depends: base, base-unicode-symbols, data-textual, formatting, parsec
-               , template-haskell, tasty, tasty-hunit, text-printer, text
-               , text-format, time
+  build-depends: base, base-unicode-symbols, data-textual, formatting, lens
+               , parsec, template-haskell, tasty, tasty-hunit, text-printer
+               , text, text-format, time
 
-               , more-unicode     >= 0.0.12.0
-               , number           >= 1.1.0.0
-               , parsec-plus-base >= 1.0.0.0
+               , has-callstack    >= 1.0.0.0
+               , more-unicode     >= 0.0.13.0
+               , number           >= 1.1.2.0
+               , parsec-plus-base >= 1.0.1.1
+               , parser-plus      >= 1.0.3.0
                
 
   -- Directories containing source files.

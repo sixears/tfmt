@@ -1,1 +1,5 @@
-number	1-1-0-0
+has-callstack		1-0-0-0
+more-unicode		0-0-13-0
+number			1-1-2-0
+parsec-plus-base	1-0-1-1
+parser-plus		1-0-3-0
