@@ -118,13 +118,9 @@ import Text.Parsec.Combinator  ( eof, many1, option, optionMaybe )
 import Text.Parsec.Error       ( ParseError )
 import Text.Parsec.Prim        ( (<?>), parse, try )
 
--- parsec-plus -------------------------
+-- parsec-plus-base --------------------
 
-import ParsecPlusBase  ( Parser )
-
--- parsen-plus -------------------------
-
-import ParserPlus  ( boundedDoubledChars )
+import ParsecPlusBase  ( Parser, boundedDoubledChars )
 
 -- template-haskell --------------------
 
@@ -541,7 +537,7 @@ toFormatBytes b = later $ LazyBuilder.fromText ∘ formatBytes b
                            "2020-04-20Z05:58:47 Mon"
 
    [@k@] - `ToCallStack` α ⇒ Render the top line of a callstack.
-                             
+
    [@K@] - `ToCallStack` α ⇒ Render a callstack *as multiple lines*.  Note
                              that the behaviour of basic numeric fills with
                              multiple lines is undefined; you might want to use

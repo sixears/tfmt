@@ -1,3 +1,7 @@
+0.2.4.1 2022-01-01
+==================
+- use parsec-plus-base; we don't need parsec-plus
+
 0.2.4.0 2021-04-29
 ==================
 - use has-callstack::HasCallstack rather than Text.Fmt::ToCallStack.
