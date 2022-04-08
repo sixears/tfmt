@@ -322,6 +322,12 @@ fmtTest =
     , testCase "1973-01-01-Z17:00:00 Mon" $
           [fmtT|%-26K|] cs @?= intercalate "\n" [ "«foo» (a:b:c#8[13]→21[34])"
                                                 , "«bar» (x:y:z#55[89→233])  " ]
+
+    -- shell quoting
+    , testCase "bob" $ [fmt|%q|] ("bob" :: String) @?= ("bob"   :: Text)
+    , testCase "b b" $ [fmt|%q|] ("b b" :: String) @?= ("'b b'" :: Text)
+    , testCase "b'b" $ [fmt|%q|] ("b'b" :: String) @?= ("'b'\\''b'" :: Text)
+
     ]
 
 -- that's all, folks! ---------------------------------------------------------

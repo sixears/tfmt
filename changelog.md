@@ -1,3 +1,7 @@
+0.2.5.0 2022-04-06
+==================
+- add 'q' for shell-quotation
+
 0.2.4.1 2022-01-01
 ==================
 - use parsec-plus-base; we don't need parsec-plus

@@ -78,7 +78,7 @@ import Data.Monoid.Unicode    ( (⊕) )
 
 -- data-textual ------------------------
 
-import Data.Textual  ( Printable, toText )
+import Data.Textual  ( Printable, toString, toText )
 
 -- formatting --------------------------
 
@@ -121,6 +121,10 @@ import Text.Parsec.Prim        ( (<?>), parse, try )
 -- parsec-plus-base --------------------
 
 import ParsecPlusBase  ( Parser, boundedDoubledChars )
+
+-- process -----------------------------
+
+import System.Process.Internals  ( translate )
 
 -- template-haskell --------------------
 
@@ -182,7 +186,7 @@ conversion =
   Conversion ⊳ (string "%" ⋫ optionMaybe fill)
              ⊵ optionMaybe precision
              ⊵ optionMaybe (pack ⊳ boundedDoubledChars '{' '}')
-             ⊵ (oneOf "bdefIkKlLnostTwxyYzZ" <?> "valid conversion char")
+             ⊵ (oneOf "bdefIkKlLnoqstTwxyYzZ" <?> "valid conversion char")
 
 ----------------------------------------
 
@@ -427,6 +431,11 @@ toTextListF =
 
 ----------------------------------------
 
+toShell ∷ Printable t ⇒ Format r (t → r)
+toShell = later $ LazyBuilder.fromString ∘ translate ∘ toString
+
+----------------------------------------
+
 toFormatBytes ∷ (Formatters.Buildable a, Integral a) ⇒
                 ByteFmtBase → Format r (a → r)
 toFormatBytes b = later $ LazyBuilder.fromText ∘ formatBytes b
@@ -542,6 +551,8 @@ toFormatBytes b = later $ LazyBuilder.fromText ∘ formatBytes b
                              that the behaviour of basic numeric fills with
                              multiple lines is undefined; you might want to use
                              a `{…}` clause here to provide indenting.
+
+   [@q@] - `Printable` @ τ ⇒ `translate` t @; shell-quote string.
 -}
 
 {- | Character op: non-Nothing precision causes error. -}
@@ -572,6 +583,7 @@ charOp c@'l' _ p t = charOpNoPrecision (varE 'text) c p t
 charOp c@'s' _ p t = charOpNoPrecision (varE 'Formatters.string) c p t
 charOp c@'t' _ p t = charOpNoPrecision (varE 'stext) c p t
 charOp c@'T' _ p t = charOpNoPrecision (varE 'toTextF) c p t
+charOp c@'q' _ p t = charOpNoPrecision (varE 'toShell) c p t
 charOp c@'w' _ p t = charOpNoPrecision (varE 'shown) c p t
 
 charOp c@'d' _ p t = charOpNoPrecision (varE 'int) c p t
