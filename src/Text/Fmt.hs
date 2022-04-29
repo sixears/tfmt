@@ -186,7 +186,7 @@ conversion =
   Conversion ⊳ (string "%" ⋫ optionMaybe fill)
              ⊵ optionMaybe precision
              ⊵ optionMaybe (pack ⊳ boundedDoubledChars '{' '}')
-             ⊵ (oneOf "bdefIkKlLnoqstTwxyYzZ" <?> "valid conversion char")
+             ⊵ (oneOf "bdefIkKlLnoqQstTwxyYzZ" <?> "valid conversion char")
 
 ----------------------------------------
 
@@ -434,6 +434,11 @@ toTextListF =
 toShell ∷ Printable t ⇒ Format r (t → r)
 toShell = later $ LazyBuilder.fromString ∘ translate ∘ toString
 
+toShellList ∷ (Foldable f, Printable t) ⇒ Format r (f t → r)
+toShellList =
+  let quote = toText ∘ translate ∘ toString
+   in later $ LazyBuilder.fromText ∘ Text.intercalate " " ∘ fmap quote ∘ toList
+
 ----------------------------------------
 
 toFormatBytes ∷ (Formatters.Buildable a, Integral a) ⇒
@@ -553,6 +558,8 @@ toFormatBytes b = later $ LazyBuilder.fromText ∘ formatBytes b
                              a `{…}` clause here to provide indenting.
 
    [@q@] - `Printable` @ τ ⇒ `translate` t @; shell-quote string.
+   [@Q@] - A `Foldable` of things, where the things are instances of
+           `Printable`, which are shell-quoted like @q@, and joined with ' '.
 -}
 
 {- | Character op: non-Nothing precision causes error. -}
@@ -585,6 +592,10 @@ charOp c@'t' _ p t = charOpNoPrecision (varE 'stext) c p t
 charOp c@'T' _ p t = charOpNoPrecision (varE 'toTextF) c p t
 charOp c@'q' _ p t = charOpNoPrecision (varE 'toShell) c p t
 charOp c@'w' _ p t = charOpNoPrecision (varE 'shown) c p t
+
+-- list (foldable) of shell-quoted things, joined with ' '
+charOp c@'Q' _ p t = charOpNoPrecision (varE 'toShellList) c p t
+
 
 charOp c@'d' _ p t = charOpNoPrecision (varE 'int) c p t
 charOp c@'x' _ p t = charOpNoPrecision (varE 'hex) c p t

@@ -1,3 +1,7 @@
+0.2.6.0 2022-04-29
+==================
+- add 'Q' for shell-quoted lists
+
 0.2.5.0 2022-04-06
 ==================
 - add 'q' for shell-quotation
