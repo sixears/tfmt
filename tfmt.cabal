@@ -54,19 +54,26 @@ library
   -- modules included in this library but not exported.
   other-modules:    Text.Fmt.Token
 
-  default-extensions: OverloadedStrings
+  default-extensions: FlexibleContexts
+                    , FlexibleInstances
+                    , NoImplicitPrelude
+                    , OverloadedStrings
                     , PatternSynonyms
                     , QuasiQuotes
+                    , ScopedTypeVariables
                     , TemplateHaskell
                     , UnicodeSyntax
+                    , ViewPatterns
+
   -- LANGUAGE extensions used by modules in this package.
   -- other-extensions:
 
   -- Other library packages from which modules are imported.
-  build-depends: base, base-unicode-symbols, data-textual, formatting, lens
-               , parsec, process, template-haskell, tasty, tasty-hunit
-               , text, text-format, text-printer, time
+  build-depends: base, containers, data-textual, formatting, lens, parsec
+               , process, template-haskell, tasty, tasty-hunit, text
+               , text-format, text-printer, time
 
+               , base0t           >= 0.0.1.0
                , has-callstack    >= 1.0.1.0
                , more-unicode     >= 0.0.16.0
                , number           >= 1.1.2.0

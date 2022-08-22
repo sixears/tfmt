@@ -1,14 +1,3 @@
-{-# LANGUAGE FlexibleContexts     #-}
-{-# LANGUAGE FlexibleInstances    #-}
-{-# LANGUAGE NoImplicitPrelude    #-}
-{-# LANGUAGE OverloadedStrings    #-}
-{-# LANGUAGE PatternSynonyms      #-}
-{-# LANGUAGE ScopedTypeVariables  #-}
-{-# LANGUAGE TemplateHaskell      #-}
-{-# LANGUAGE TypeSynonymInstances #-}
-{-# LANGUAGE UnicodeSyntax        #-}
-{-# LANGUAGE ViewPatterns         #-}
-
 {- | Format Text or Strings, in a type-safe way, using Quasi Quotations.
 
     @
@@ -43,47 +32,27 @@ module Text.Fmt
   , Token(..), conversion, fill, sprintf, tokens )
 where
 
+import Base0T
 import Prelude ( Double, Int, Integral, Real, RealFloat
-               , (+), (-), (/), (^), (**)
-               , abs, decodeFloat, error, floor, fromIntegral, toInteger
-               )
+               , (/), (^), (**), decodeFloat, error, floor )
 
 -- base --------------------------------
 
-import Control.Applicative  ( many, pure )
-import Data.Bool            ( otherwise )
-import Data.Char            ( isDigit, toUpper )
-import Data.Eq              ( Eq )
-import Data.Foldable        ( Foldable, foldr, toList )
-import Data.Function        ( ($), const, id )
-import Data.Functor         ( fmap )
-import Data.List            ( concat, elem, intercalate, reverse )
-import Data.Maybe           ( fromMaybe )
-import Data.Ord             ( (<), (>) )
-import Data.Tuple           ( fst )
-import Data.Word            ( Word8 )
-import GHC.Stack            ( SrcLoc
-                            , getCallStack, srcLocFile, srcLocModule
-                            , srcLocPackage, srcLocEndCol, srcLocEndLine
-                            , srcLocStartCol, srcLocStartLine
-                            )
-import Numeric              ( logBase )
-import Text.Read            ( read )
-import Text.Show            ( Show( show ) )
+import Data.Char      ( isDigit, toUpper )
+import Data.Foldable  ( Foldable )
+import Data.List      ( concat, elem, intercalate, reverse )
+import Data.Maybe     ( fromMaybe )
+import GHC.Stack      ( SrcLoc
+                      , getCallStack, srcLocFile, srcLocModule, srcLocPackage
+                      , srcLocEndCol, srcLocEndLine, srcLocStartCol
+                      , srcLocStartLine
+                      )
+import Numeric        ( logBase )
+import Text.Read      ( read )
 
--- base-unicode-symbols ----------------
+-- containers --------------------------
 
-import Data.Bool.Unicode        ( (∧), (∨) )
-import Data.Eq.Unicode          ( (≡) )
-import Data.Function.Unicode    ( (∘) )
-import Data.List.Unicode        ( (∈) )
-import Data.Monoid.Unicode      ( (⊕) )
-import Numeric.Natural.Unicode  ( ℕ )
-import Prelude.Unicode          ( ℤ )
-
--- data-textual ------------------------
-
-import Data.Textual  ( Printable, toString, toText )
+import qualified Data.Map.Lazy  as  Map
 
 -- formatting --------------------------
 
@@ -136,8 +105,8 @@ import System.Process.Internals  ( translate )
 
 -- template-haskell --------------------
 
-import Language.Haskell.TH  ( ExpQ, Name, appE, charL, conE, infixE, integerL
-                            , litE, stringL, varE )
+import Language.Haskell.TH  ( ExpQ, Name, appE, charL, infixE, integerL, litE
+                            , stringL, varE )
 import Language.Haskell.TH.Quote
                             ( QuasiQuoter( QuasiQuoter, quoteDec
                                          , quoteExp, quotePat, quoteType ) )
@@ -387,7 +356,10 @@ tokOp ∷ Token → ExpQ
 tokOp (Str s) = litE $ stringL s
 -- conversion, no padding
 tokOp (Conversion mod fill_ prec txt convchar) =
-  let t = charOp convchar mod (fst ⊳ fill_) prec txt
+  let CharOp op = Map.findWithDefault badconv convchar charOps
+                 where badconv = error $ "bad conversion char '" ⊕ [convchar] ⊕ "'"
+      t = op convchar mod (fst ⊳ fill_) prec txt -- charOp convchar mod (fst ⊳ fill_) prec txt
+
 
       checkCommaValid x =
         if mod ≡ MOD_NONE ∨ convchar ∈ "dfnxboeyY"
@@ -672,56 +644,54 @@ charOpNoPrecision _ chr (𝕵 prec) (𝕵 t) =
             , show prec, ")", " nor text ({", unpack t
             , "})" ]
 
+newtype CharOp = CharOp (ℂ → Modifier → (𝕄 ℤ) → (𝕄 ℕ) → (𝕄 𝕋) → ExpQ)
+
 {- | Conversion character as formatter; e.g., 't' → stext; takes fill width &
      precision too, lest that affect the conversion. -}
-charOp ∷ ℂ        -- ^ conversion character (mostly for errmsgs)
-       → Modifier -- ^ conversion modifier, e.g., ',' for commafication
-       → 𝕄 ℤ     -- ^ fill width
-       → 𝕄 ℕ     -- ^ precision
-       → 𝕄 𝕋     -- ^ optional text (between {}) (unused in charOp)
-       → ExpQ
+charOps ∷ Map.Map ℂ CharOp
+charOps = Map.fromList $
+  let
+    no_prec f = CharOp $ \ c _ _ p t → charOpNoPrecision f c p t
+    e_no_text c t = error $ "conversion char '" ⊕ [c] ⊕ "' "
+                          ⊕ "admits no text ({" ⊕ unpack t ⊕ "})"
+  in
+    [ -- list (foldable), joined with ','
+      ('L', no_prec ⟦ toTextListF ⟧)
+      -- lazy text
+    , ('l', no_prec ⟦ text ⟧)
+    , ('s', no_prec ⟦ Formatters.string ⟧)
+    , ('t', no_prec ⟦ stext ⟧)
+    , ('T', no_prec ⟦ toTextF ⟧)
+    , ('q', no_prec ⟦ toShell ⟧)
+    , ('w', no_prec ⟦ shown ⟧)
 
--- list (foldable), joined with ','
-charOp c@'L' _ _ p t = charOpNoPrecision (varE 'toTextListF) c p t
--- lazy text
-charOp c@'l' _ _ p t = charOpNoPrecision (varE 'text) c p t
-charOp c@'s' _ _ p t = charOpNoPrecision (varE 'Formatters.string) c p t
-charOp c@'t' _ _ p t = charOpNoPrecision (varE 'stext) c p t
-charOp c@'T' _ _ p t = charOpNoPrecision (varE 'toTextF) c p t
-charOp c@'q' _ _ p t = charOpNoPrecision (varE 'toShell) c p t
-charOp c@'w' _ _ p t = charOpNoPrecision (varE 'shown) c p t
+      -- list (foldable) of shell-quoted things, joined with ' '
+    , ('Q', no_prec ⟦ toShellList ⟧)
 
--- list (foldable) of shell-quoted things, joined with ' '
-charOp c@'Q' _ _ p t = charOpNoPrecision (varE 'toShellList) c p t
+    , ('d', no_prec ⟦ int ⟧)
+    , ('x', no_prec ⟦ hex ⟧)
+    , ('b', no_prec ⟦ bin ⟧)
+    , ('o', no_prec ⟦ oct ⟧)
+    , ('n', no_prec ⟦ tonum ⟧)
 
+    , let char_op _ _ _ 𝕹     𝕹     = ⟦ floatmin ⟧
+          char_op _ _ _ (𝕵 i) 𝕹     = ⟦ fixed i ⟧
+          char_op c _ _ _     (𝕵 t) = e_no_text c t
+      in  ('f', CharOp char_op)
+    , let char_op _ _ _ 𝕹     𝕹     = ⟦ expt 0 ⟧
+          char_op _ _ _ (𝕵 i) 𝕹     = ⟦ expt i ⟧
+          char_op c _ _ _     (𝕵 t) = e_no_text c t
+      in  ('e', CharOp char_op)
 
-charOp c@'d' _ _ p t = charOpNoPrecision (varE 'int) c p t
-charOp c@'x' _ _ p t = charOpNoPrecision (varE 'hex) c p t
-charOp c@'b' _ _ p t = charOpNoPrecision (varE 'bin) c p t
-charOp c@'o' _ _ p t = charOpNoPrecision (varE 'oct) c p t
-charOp c@'n' _ _ p t = charOpNoPrecision (varE 'tonum) c p t
+    , ('y', no_prec ⟦ toFormatBytes B_1000 ⟧)
+    , ('Y', no_prec ⟦ toFormatBytes B_1024 ⟧)
 
-charOp 'f' _ _ _ (𝕵 t) =
-  error $ "conversion char 'f' admits no text ({" ⊕ unpack t ⊕ "})"
-charOp 'f' _ _ 𝕹  𝕹 = varE 'floatmin
-charOp 'f' _ _ (𝕵 i) 𝕹 =
-  appE (varE 'fixed) (litE (integerL $ fromIntegral i))
-charOp 'e' _ _ 𝕹  𝕹 = appE (varE 'expt) (litE (integerL 0))
-charOp 'e' _ _ (𝕵 i) 𝕹 = appE
-  (varE 'expt) (litE (integerL $ fromIntegral i))
+    , ('z', no_prec ⟦ toFormatUTC ⟧)
+    , ('Z', no_prec ⟦ toFormatUTCDoW ⟧)
 
-charOp c@'y' _ _ p t =
-  charOpNoPrecision (appE (varE 'toFormatBytes) (conE 'B_1000)) c p t
-charOp c@'Y' _ _ p t =
-  charOpNoPrecision (appE (varE 'toFormatBytes) (conE 'B_1024)) c p t
-
-charOp c@'z' _ _ p t = charOpNoPrecision (varE 'toFormatUTC) c p t
-charOp c@'Z' _ _ p t = charOpNoPrecision (varE 'toFormatUTCDoW) c p t
-
-charOp c@'k' _ _ p t = charOpNoPrecision (varE 'toFormatStackHead) c p t
-charOp c@'K' _ _ p t = charOpNoPrecision (varE 'toFormatCallStack) c p t
-
-charOp x _ _ _ _ = error $ "bad conversion char '" ⊕ [x] ⊕ "'"
+    , ('k', no_prec ⟦ toFormatStackHead ⟧)
+    , ('K', no_prec ⟦ toFormatCallStack ⟧)
+    ]
 
 floatmin ∷ Real α ⇒ Format r (α → r)
 floatmin = let dropper = dropWhileEnd (`elem` (".0" ∷ 𝕊))
