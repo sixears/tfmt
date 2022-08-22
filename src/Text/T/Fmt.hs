@@ -1,14 +1,9 @@
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE QuasiQuotes       #-}
-{-# LANGUAGE TemplateHaskell   #-}
-{-# LANGUAGE UnicodeSyntax     #-}
-
 {-# OPTIONS_HADDOCK hide #-}
 
 {- | tests for Text.Fmt -}
 
 module Text.T.Fmt
-  ( _test, unitTests )
+  ( _test, tests )
 where
 
 import Prelude ( Double, Float, Int, Integer, (^) )
@@ -20,7 +15,6 @@ import Data.Either      ( Either( Left, Right ) )
 import Data.Eq          ( Eq )
 import Data.Function    ( ($) )
 import Data.List        ( isInfixOf )
-import Data.Maybe       ( Maybe( Just, Nothing ) )
 import Data.Monoid      ( (<>) )
 import Data.String      ( String, unlines )
 import Data.Word        ( Word8 )
@@ -35,6 +29,7 @@ import Data.Textual  ( Printable( print ) )
 
 -- more-unicode ------------------------
 
+import Data.MoreUnicode.Maybe   ( pattern 𝕵, pattern 𝕹 )
 import Data.MoreUnicode.String  ( 𝕊 )
 import Data.MoreUnicode.Text    ( 𝕋 )
 
@@ -48,11 +43,11 @@ import Test.Tasty  ( TestTree, defaultMain, testGroup )
 
 -- tasty-hunit -------------------------
 
-import Test.Tasty.HUnit  ( Assertion, (@?=), assertBool, testCase )
+import Test.Tasty.HUnit  ( Assertion, (@=?), (@?=), assertBool, testCase )
 
 -- text --------------------------------
 
-import qualified  Data.Text.Lazy  as  LazyText
+import qualified  Data.Text.Lazy  as  LT
 
 import Data.Text  ( Text, intercalate, unpack )
 
@@ -68,9 +63,12 @@ import Data.Time.Clock.POSIX  ( posixSecondsToUTCTime )
 --                     local imports                      --
 ------------------------------------------------------------
 
-import Text.Fmt  ( ByteFmtBase( B_1024, B_1000 ), Token( Conversion, Str )
-                 , conversion, fill, fmt, fmtS, fmtL, fmtT, formatBytes
-                 , sprintf, tokens )
+import Text.Fmt        ( ByteFmtBase( B_1024, B_1000 )
+                       , conversion, commify, commifyR, fill, fmt, fmtS, fmtL
+                       , fmtT, formatBytes, sprintf, tokens
+                       )
+import Text.Fmt.Token  ( Modifier( MOD_COMMIFY, MOD_NONE )
+                       , Token( Conversion, Str ) )
 
 -------------------------------------------------------------------------------
 
@@ -87,24 +85,97 @@ _test ∷ IO ()
 _test = defaultMain tests
 
 tests ∷ TestTree
-tests = testGroup "tests" [ unitTests ]
-
--- | unit tests
-unitTests ∷ TestTree
-unitTests = testGroup "unitTests" [ hunitGroup ]
-
-hunitGroup ∷ TestTree
-hunitGroup =
-  testGroup "CmdLib.Fmt hunit" [ fillTest, convTest, formatBytesTest
-                               , tokensTest, sprintfTest, fmtTest ]
+tests = testGroup "Text.Fmt" [ fillTest, convTest, formatBytesTest
+                             , tokensTest, sprintfTest, commifyTests
+                             , commifyRTests, fmtTest
+                             ]
 
 convTest ∷ TestTree
 convTest =
   testGroup "conversion" $
     let testConv t expect = testCase t $ parse conversion t t @?= Right expect
-      in [ testConv "%t"      (Conversion Nothing Nothing Nothing 't')
-         , testConv "%-03.2f" (Conversion (Just (-3,'0')) (Just 2) Nothing 'f')
+      in [ testConv "%t"      (Conversion MOD_NONE 𝕹 𝕹 𝕹 't')
+         , testConv "%-03.2f" (Conversion MOD_NONE (𝕵 (-3,'0')) (𝕵 2) 𝕹 'f')
          ]
+
+commifyTests ∷ TestTree
+commifyTests =
+  let checkn n exp t = testCase (LT.unpack exp) $ exp @=? commify '0' n t
+      check0 = checkn 0
+      check6 = checkn 6
+      check8 = checkn 8
+  in  testGroup "commify"
+        [ check0            ""          ""
+        , check0           "1"         "1"
+        , check0          "21"        "21"
+        , check0         "321"       "321"
+        , check0       "4,321"      "4321"
+        , check0      "54,321"     "54321"
+        , check0     "654,321"    "654321"
+        , check0   "7,654,321"   "7654321"
+        , check0  "87,654,321"  "87654321"
+        , check0 "987,654,321" "987654321"
+        , check6      "00,000"          ""
+        , check6      "00,001"         "1"
+        , check6      "00,021"        "21"
+        , check6      "00,321"       "321"
+        , check6      "04,321"      "4321"
+        , check6      "54,321"     "54321"
+        , check6     "654,321"    "654321"
+        , check6   "7,654,321"   "7654321"
+        , check6  "87,654,321"  "87654321"
+        , check6 "987,654,321" "987654321"
+        , check8    "0000,000"          ""
+        , check8    "0000,001"         "1"
+        , check8    "0000,021"        "21"
+        , check8    "0000,321"       "321"
+        , check8    "0004,321"      "4321"
+        , check8    "0054,321"     "54321"
+        , check8    "0654,321"    "654321"
+        , check8   "7,654,321"   "7654321"
+        , check8  "87,654,321"  "87654321"
+        , check8 "987,654,321" "987654321"
+        , testCase "7777" $ "0,007,777" @=? commify '0' 9 "7777"
+        ]
+
+commifyRTests ∷ TestTree
+commifyRTests =
+  let checkn n exp t = testCase (LT.unpack exp) $ exp @=? commifyR '0' n t
+      check0 = checkn 0
+      check6 = checkn 6
+      check8 = checkn 8
+  in  testGroup "commifyR"
+        [ check0 ""            ""
+        , check0 "1"           "1"
+        , check0 "21"          "21"
+        , check0 "321"         "321"
+        , check0 "432,1"       "4321"
+        , check0 "543,21"      "54321"
+        , check0 "654,321"     "654321"
+        , check0 "765,432,1"   "7654321"
+        , check0 "876,543,21"  "87654321"
+        , check0 "987,654,321" "987654321"
+        , check6 "000,00"      ""
+        , check6 "100,00"      "1"
+        , check6 "210,00"      "21"
+        , check6 "321,00"      "321"
+        , check6 "432,10"      "4321"
+        , check6 "543,21"      "54321"
+        , check6 "654,321"     "654321"
+        , check6 "765,432,1"   "7654321"
+        , check6 "876,543,21"  "87654321"
+        , check6 "987,654,321" "987654321"
+        , check8 "000,0000"    ""
+        , check8 "100,0000"    "1"
+        , check8 "210,0000"    "21"
+        , check8 "321,0000"    "321"
+        , check8 "432,1000"    "4321"
+        , check8 "543,2100"    "54321"
+        , check8 "654,3210"    "654321"
+        , check8 "765,432,1"   "7654321"
+        , check8 "876,543,21"  "87654321"
+        , check8 "987,654,321" "987654321"
+        ]
 
 formatBytesTest ∷ TestTree
 formatBytesTest =
@@ -166,19 +237,22 @@ tokensTest =
          , testTokens "%\t%t"            (Left "unexpected \"\\t\"")
          , testTokens "%t%a"             (Left "unexpected \"a\"")
          , testTokens "my %ttoken"
-             (Right [ Str "my ", Conversion Nothing Nothing Nothing 't'
+             (Right [ Str "my ", Conversion MOD_NONE 𝕹 𝕹 𝕹 't'
                     , Str "token" ])
          , testTokens "%7t token"
-             (Right [ Conversion (Just (7, ' ')) Nothing Nothing 't'
+             (Right [ Conversion MOD_NONE (𝕵 (7, ' ')) 𝕹 𝕹 't'
                     , Str " token" ])
          , testTokens "%-7t%%"
-             (Right [ Conversion (Just (-7, ' ')) Nothing Nothing 't'
+             (Right [ Conversion MOD_NONE (𝕵 (-7, ' ')) 𝕹 𝕹 't'
                     , Str "%" ])
          , testTokens "%07t token"
-             (Right [ Conversion (Just (7, '0')) Nothing Nothing 't'
+             (Right [ Conversion MOD_NONE (𝕵 (7, '0')) 𝕹 𝕹 't'
                     , Str " token" ])
          , testTokens "%-07t%%"
-             (Right [ Conversion (Just (-7, '0')) Nothing Nothing 't'
+             (Right [ Conversion MOD_NONE (𝕵 (-7, '0')) 𝕹 𝕹 't'
+                    , Str "%" ])
+         , testTokens "%,-07t%%"
+             (Right [ Conversion MOD_COMMIFY (𝕵 (-7, '0')) 𝕹 𝕹 't'
                     , Str "%" ])
          ]
 
@@ -208,7 +282,7 @@ fmtTest =
       x ^^ y = x ^ y
       bar = "bar" ∷ String
       dayOne = posixSecondsToUTCTime 94755600
-   in testGroup "fmt"
+   in testGroup "fmt" $
     [ testCase "-empty-"  $ [fmt||]               @?= ("" ∷ Text)
 
     , testCase "foo%tbaz" $ [fmt|foo%tbaz|] "bar" @?= ("foobarbaz" ∷ Text)
@@ -219,7 +293,7 @@ fmtTest =
 
     , testCase "a%-3sc"   $ [fmt|a%3sc|]    "b"   @?= ("a  bc" ∷ Text)
     , testCase "a%-2lc"   $ [fmt|a%-3lc|]   "b"   @?= ("ab  c" ∷ Text)
-    , testCase "a%5Lc"   $ [fmt|a%5Lc|] (["b","d"] ∷ [LazyText.Text])
+    , testCase "a%5Lc"   $ [fmt|a%5Lc|] (["b","d"] ∷ [LT.Text])
                                                   @?= ("a  b,dc" ∷ Text)
 
     , testCase "foo%Tbaz" $ [fmt|foo%Tbaz|] bar @?= ("foobarbaz" ∷ String)
@@ -235,6 +309,29 @@ fmtTest =
     , testCase "a%-3wc" $ [fmt|a%-3wc|] ("b" ∷ String) @?= ("a\"b\"c" ∷ Text)
     , testCase "a%-5wc" $ [fmt|a%-5wc|] ("b" ∷ String) @?= ("a\"b\"  c"∷Text)
     , testCase "a%5wc" $ [fmt|a%5wc|] ("b" ∷ String) @?= ("a  \"b\"c" ∷ Text)
+
+
+    , testCase ",7"       $ [fmt|%,d|]      (7 ∷ Int) @?=         ("7" ∷ Text)
+    , testCase "7777"     $ [fmt|%d|]    (7777 ∷ Int) @?=      ("7777" ∷ Text)
+    , testCase ",7777"    $ [fmt|%,d|]   (7777 ∷ Int) @?=     ("7,777" ∷ Text)
+    , testCase ",777"     $ [fmt|%,09d|]  (777 ∷ Int) @?= ("0,000,777" ∷ Text)
+    , testCase ",7777@09" $ [fmt|%,09d|] (7777 ∷ Int) @?= ("0,007,777" ∷ Text)
+    , testCase ",7777@08" $ [fmt|%,08d|] (7777 ∷ Int) @?=  ("0007,777" ∷ Text)
+    , testCase ",7777@9"  $ [fmt|%,9d|]  (7777 ∷ Int) @?= ("    7,777" ∷ Text)
+    , testCase ",7777@8"  $ [fmt|%,8d|]  (7777 ∷ Int) @?=  ("   7,777" ∷ Text)
+    , testCase ",7777@7"  $ [fmt|%,7d|]  (7777 ∷ Int) @?=   ("  7,777" ∷ Text)
+    , -- yes, 7,777000 - that is, a commified 7,777; plus 0 to fill.
+      -- we don't try to commify 0s on the RHS, that probably doesn't make any
+      -- sense.
+      testCase ",7777@-08" $ [fmt|%,-08d|] (7777 ∷ Int) @?= ("7,777000" ∷ Text)
+    , testCase ",7777@-06" $ [fmt|%,-06d|] (7777 ∷ Int) @?= ("7,7770" ∷ Text)
+    , testCase ",7777@-7" $ [fmt|%,-7d|] (7777 ∷ Int) @?= ("7,777  " ∷ Text)
+    , testCase ",7777@-8" $ [fmt|%,-8d|] (7777 ∷ Int) @?= ("7,777   " ∷ Text)
+    , testCase ",7777@-9" $ [fmt|%,-9d|] (7777 ∷ Int) @?= ("7,777    " ∷ Text)
+-- formatters `commas` uses an integral value; we can do something with floats
+-- by splitting them up, perhaps, but we'll need to do something like splitting
+-- up the number into "whole number" and fractional parts
+--    , testCase ",777" $ [fmt|%,08.2f|] (777.21 ∷ Float) @?= ("0,777.21" ∷ Text)
 
     , testCase "a%3dc: 7" $ [fmt|a%3dc|]  (7 ∷ Int)      @?= ("a  7c" ∷ Text)
     , testCase "a%3dc:-7" $ [fmt|a%3dc|] (-7 ∷ Int)      @?= ("a -7c" ∷ Text)
@@ -256,9 +353,11 @@ fmtTest =
     , testCase "%-4b"     $ [fmt|%-4b|]      (6 ∷ Int)  @?= ("110 " ∷ Text)
     , testCase "%2b"      $ [fmt|%2b|]       (6 ∷ Int)  @?= ( "110" ∷ Text)
 
-    , testCase "%f"     $ [fmtT|%f|]      (6 ∷ Int)     @?=  "6"
-    , testCase "%f"     $ [fmtT|%f|]    (6.5 ∷ Float)   @?=  "6.5"
-    , testCase "%f"     $ [fmtT|%f|]    (6.2 ∷ Double)  @?=  "6.2"
+    , testCase "%f 6"       $ [fmtT|%f|]          (6 ∷ Int)    @?= "6"
+    , testCase "%f 6.5"     $ [fmtT|%f|]        (6.5 ∷ Float)  @?= "6.5"
+    , testCase "%f 6.2"     $ [fmtT|%f|]        (6.2 ∷ Double) @?= "6.2"
+    , testCase "%f 1234.5…" $ [fmtT|%f|]  (1234.5678 ∷ Double) @?= "1234.5678"
+    , testCase "%f 1234.5…" $ [fmtT|%,f|] (1234.5678 ∷ Double) @?= "1,234.567,8"
 
     , testCase "%L"       $ [fmtT|(%L)|]     ts  @?=  "(ttt: c,ttt: b,ttt: a)"
     , testCase "%22L"     $ [fmtT|(%22L)|]   ts  @?=  "(  ttt: c,ttt: b,ttt: a)"
@@ -281,7 +380,7 @@ fmtTest =
 
     , testCase "fmtS"         $ [fmtS|a%03tc|] "b" @?= ("a00bc" ∷ String)
     , testCase "as string"    $ [fmtS|a%03tc|] "b" @?=  "a00bc"
-    , testCase "fmtL"       $ [fmtL|a%03tc|] "b" @?= ("a00bc" ∷LazyText.Text)
+    , testCase "fmtL"       $ [fmtL|a%03tc|] "b" @?= ("a00bc" ∷LT.Text)
     , testCase "as lazy text" $ [fmtL|a%03tc|] "b" @?= "a00bc"
     , testCase "fmtT"        $ [fmtT|a%03tc|] "b" @?= ("a00bc" ∷ Text)
     , testCase "as strict text" $ [fmtT|a%03tc|] "b" @?= "a00bc"

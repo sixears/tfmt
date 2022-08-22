@@ -2,6 +2,7 @@
 {-# LANGUAGE FlexibleInstances    #-}
 {-# LANGUAGE NoImplicitPrelude    #-}
 {-# LANGUAGE OverloadedStrings    #-}
+{-# LANGUAGE PatternSynonyms      #-}
 {-# LANGUAGE ScopedTypeVariables  #-}
 {-# LANGUAGE TemplateHaskell      #-}
 {-# LANGUAGE TypeSynonymInstances #-}
@@ -36,29 +37,30 @@ module Text.Fmt
     -- $formatting
 
     ByteFmtBase(..), FormatTarget(..), ToUTCTimeY( toUTCTimeY )
-  , fmt, fmtS, fmtL, fmtT, formatBytes, formatUTCY, formatUTCYDoW
+  , commify, commifyR, fmt, fmtS, fmtL, fmtT, formatBytes, formatUTCY
+  , formatUTCYDoW
   -- for testing only
   , Token(..), conversion, fill, sprintf, tokens )
 where
 
-import Prelude ( Double, Int, Integer, Integral, Real, RealFloat
+import Prelude ( Double, Int, Integral, Real, RealFloat
                , (+), (-), (/), (^), (**)
                , abs, decodeFloat, error, floor, fromIntegral, toInteger
                )
 
 -- base --------------------------------
 
-import Control.Applicative  ( many )
+import Control.Applicative  ( many, pure )
 import Data.Bool            ( otherwise )
-import Data.Char            ( Char, toUpper )
-import Data.Either          ( Either( Left, Right ) )
+import Data.Char            ( isDigit, toUpper )
 import Data.Eq              ( Eq )
 import Data.Foldable        ( Foldable, foldr, toList )
 import Data.Function        ( ($), const, id )
 import Data.Functor         ( fmap )
-import Data.List            ( concat, elem, intercalate )
-import Data.Maybe           ( Maybe( Just, Nothing ) )
+import Data.List            ( concat, elem, intercalate, reverse )
+import Data.Maybe           ( fromMaybe )
 import Data.Ord             ( (<), (>) )
+import Data.Tuple           ( fst )
 import Data.Word            ( Word8 )
 import GHC.Stack            ( SrcLoc
                             , getCallStack, srcLocFile, srcLocModule
@@ -66,15 +68,18 @@ import GHC.Stack            ( SrcLoc
                             , srcLocStartCol, srcLocStartLine
                             )
 import Numeric              ( logBase )
-import Numeric.Natural      ( Natural )
 import Text.Read            ( read )
 import Text.Show            ( Show( show ) )
 
 -- base-unicode-symbols ----------------
 
-import Data.Eq.Unicode        ( (≡) )
-import Data.Function.Unicode  ( (∘) )
-import Data.Monoid.Unicode    ( (⊕) )
+import Data.Bool.Unicode        ( (∧), (∨) )
+import Data.Eq.Unicode          ( (≡) )
+import Data.Function.Unicode    ( (∘) )
+import Data.List.Unicode        ( (∈) )
+import Data.Monoid.Unicode      ( (⊕) )
+import Numeric.Natural.Unicode  ( ℕ )
+import Prelude.Unicode          ( ℤ )
 
 -- data-textual ------------------------
 
@@ -100,9 +105,12 @@ import Control.Lens  ( view )
 -- more-unicode ------------------------
 
 import Data.MoreUnicode.Applicative  ( (∤), (⋪), (⋫), (⊵) )
+import Data.MoreUnicode.Bool         ( 𝔹, pattern 𝕿, pattern 𝕱 )
+import Data.MoreUnicode.Char         ( ℂ )
+import Data.MoreUnicode.Either       ( 𝔼, pattern 𝕷, pattern 𝕽 )
 import Data.MoreUnicode.Functor      ( (⊳) )
 import Data.MoreUnicode.Lens         ( (⊣) )
-import Data.MoreUnicode.Maybe        ( 𝕄 )
+import Data.MoreUnicode.Maybe        ( 𝕄, pattern 𝕵, pattern 𝕹 )
 import Data.MoreUnicode.Monoid       ( ю )
 import Data.MoreUnicode.String       ( 𝕊 )
 import Data.MoreUnicode.Text         ( 𝕋 )
@@ -137,7 +145,7 @@ import Language.Haskell.TH.Quote
 -- text --------------------------------
 
 import qualified  Data.Text               as  Text
-import qualified  Data.Text.Lazy          as  LazyText
+import qualified  Data.Text.Lazy          as  LT
 import qualified  Data.Text.Lazy.Builder  as  LazyBuilder
 
 import Data.Text  ( dropWhileEnd, pack, unpack )
@@ -155,12 +163,13 @@ import Data.Time.Format  ( defaultTimeLocale, formatTime )
 --                     local imports                      --
 ------------------------------------------------------------
 
-import Text.Fmt.Token  ( Token( Conversion, Str ) )
+import Text.Fmt.Token  ( Modifier( MOD_NONE, MOD_COMMIFY )
+                       , Token( Conversion, Str ) )
 
 -------------------------------------------------------------------------------
 
 -- | tokenize a string into strings & conversions
-tokens ∷ 𝕋 → Either ParseError [Token]
+tokens ∷ 𝕋 → 𝔼 ParseError [Token]
 tokens s = concatTokens ⊳ parse (tokenP ⋪ eof) (unpack s) s
 
 ----------------------------------------
@@ -183,7 +192,8 @@ tokenP = many (simpleStr ∤ try escapePC ∤ try escapeSlash ∤ conversion)
 {- | Parse a string into a conversion specifier. -}
 conversion ∷ Parser Token
 conversion =
-  Conversion ⊳ (string "%" ⋫ optionMaybe fill)
+  Conversion ⊳ (string "%" ⋫ option MOD_NONE (char ',' ⋫pure MOD_COMMIFY))
+             ⊵ optionMaybe fill
              ⊵ optionMaybe precision
              ⊵ optionMaybe (pack ⊳ boundedDoubledChars '{' '}')
              ⊵ (oneOf "bdefIkKlLnoqQstTwxyYzZ" <?> "valid conversion char")
@@ -192,7 +202,7 @@ conversion =
 
 {- | Parser for the fill spec of a conversion (the -07 of "%-07.4s", for
      example). -}
-fill ∷ Parser (Integer, Char)
+fill ∷ Parser (ℤ, ℂ)
 fill = (\ a b c d → (read (concat [a,[c],d]), b)) ⊳ option "" (string "-")
                                                   ⊵ option ' ' (char '0')
                                                   ⊵ oneOf "123456789"
@@ -202,7 +212,7 @@ fill = (\ a b c d → (read (concat [a,[c],d]), b)) ⊳ option "" (string "-")
 
 -- | parse for the precision part of a conversion (.2 of "%3.2f", for example)
 
-precision ∷ Parser Natural
+precision ∷ Parser ℕ
 precision = read ⊳ (char '.' ⋫ many digit)
 
 ----------------------------------------
@@ -243,30 +253,30 @@ formatBytes b bs =
     where go ∷ (Formatters.Buildable b, Integral b) ⇒ Double → b → 𝕋
           go x bytes =
             let ex ∷ Word8 = floor (logBase x $ fromIntegral bytes)
-                (pfx,exp) ∷ (𝕄 Char, Word8)= case ex of
-                              0 → (Nothing,  0)
-                              1 → (Just 'k', 1)
-                              2 → (Just 'M', 2)
-                              3 → (Just 'G', 3)
-                              4 → (Just 'T', 4)
-                              5 → (Just 'P', 5)
-                              6 → (Just 'E', 6)
-                              7 → (Just 'Z', 7)
-                              _ → (Just 'Y', 8)
+                (pfx,exp) ∷ (𝕄 ℂ, Word8)= case ex of
+                              0 → (𝕹,  0)
+                              1 → (𝕵 'k', 1)
+                              2 → (𝕵 'M', 2)
+                              3 → (𝕵 'G', 3)
+                              4 → (𝕵 'T', 4)
+                              5 → (𝕵 'P', 5)
+                              6 → (𝕵 'E', 6)
+                              7 → (𝕵 'Z', 7)
+                              _ → (𝕵 'Y', 8)
                 formatB n = fixed n % Formatters.char % Formatters.string % "B"
                 i = if b ≡ B_1024 then "i" else ""
              in case pfx of
-                 Nothing → sformat (int % "B") bytes
-                 Just c  → let mant = fromIntegral bytes / (x^exp)
-                               c_   = if b ≡ B_1024 then toUpper c else c
-                             in if mant < 10
-                                then -- [fmt|%3.2f%T%sB|]
-                                     sformat (formatB 2) mant c_ i
-                                else if mant < 100
-                                     then -- [fmt|%4.1f%T%sB|]
-                                          sformat (formatB 1) mant (toUpper c) i
-                                     else -- [fmt|%4f%T%sB|]
-                                          sformat (formatB 0) mant (toUpper c) i
+                 𝕹 → sformat (int % "B") bytes
+                 𝕵 c  → let mant = fromIntegral bytes / (x^exp)
+                            c_   = if b ≡ B_1024 then toUpper c else c
+                        in if mant < 10
+                           then -- [fmt|%3.2f%T%sB|]
+                                sformat (formatB 2) mant c_ i
+                           else if mant < 100
+                                then -- [fmt|%4.1f%T%sB|]
+                                     sformat (formatB 1) mant (toUpper c) i
+                                else -- [fmt|%4f%T%sB|]
+                                     sformat (formatB 0) mant (toUpper c) i
 
 ----------------------------------------
 
@@ -274,7 +284,7 @@ class ToUTCTimeY α where
   toUTCTimeY ∷ α → 𝕄 UTCTime
 
 instance ToUTCTimeY UTCTime where
-  toUTCTimeY = Just
+  toUTCTimeY = 𝕵
 
 instance ToUTCTimeY (𝕄 UTCTime) where
   toUTCTimeY = id
@@ -283,15 +293,15 @@ instance ToUTCTimeY (𝕄 UTCTime) where
      (always in Zulu). -}
 formatUTCY ∷ ToUTCTimeY α ⇒ α → 𝕋
 formatUTCY mt = case toUTCTimeY mt of
-                  Just t  → pack $ formatTime defaultTimeLocale "%FZ%T" t
-                  Nothing → "-------------------"
+                  𝕵 t  → pack $ formatTime defaultTimeLocale "%FZ%T" t
+                  𝕹 → "-------------------"
 
 {- | Format a (Maybe UTCTime), in ISO8601-without-fractional-seconds (always in
      Zulu), with a leading 3-letter day-of-week. -}
 formatUTCYDoW ∷ ToUTCTimeY α ⇒ α → 𝕋
 formatUTCYDoW mt = case toUTCTimeY mt of
-                     Just t  → pack $ formatTime defaultTimeLocale "%FZ%T %a" t
-                     Nothing → "-----------------------"
+                     𝕵 t  → pack $ formatTime defaultTimeLocale "%FZ%T %a" t
+                     𝕹 → "-----------------------"
 
 toFormatUTC ∷ ToUTCTimeY α ⇒ Format ρ (α → ρ)
 toFormatUTC = later $ LazyBuilder.fromText ∘ formatUTCY
@@ -363,10 +373,10 @@ sprintfL = sprintf_ 'format
 sprintf_ ∷ Name → 𝕋 → ExpQ
 sprintf_ fnam t =
   case tokens t of
-    Left  e    → error $ show e
-    Right toks → appE (varE fnam) $
-                      foldr conjoin (litE $ stringL "") (fmap tokOp toks)
-                  where conjoin = infixOp '(%)
+    𝕷 e    → error $ show e
+    𝕽 toks → appE (varE fnam) $
+               foldr conjoin (litE $ stringL "") (fmap tokOp toks)
+             where conjoin = infixOp '(%)
 
 {- | Implement a token.  Regular strings pass through; conversions ("%…") are
      implemented, and padded as necessary.
@@ -374,52 +384,132 @@ sprintf_ fnam t =
  -}
 tokOp ∷ Token → ExpQ
 -- literal string
-tokOp (Str s)                         = litE $ stringL s
+tokOp (Str s) = litE $ stringL s
 -- conversion, no padding
-tokOp (Conversion Nothing p t c)      = charOp c Nothing p t
--- conversion, with padding
-tokOp (Conversion (Just (width,fll)) prec txt convchar) =
-  infixOp '(%.) (fillOp (width,fll)) (charOp convchar (Just width) prec txt)
+tokOp (Conversion mod fill_ prec txt convchar) =
+  let t = charOp convchar mod (fst ⊳ fill_) prec txt
+
+      checkCommaValid x =
+        if mod ≡ MOD_NONE ∨ convchar ∈ "dfnxboeyY"
+        then x
+        else error $ "commafication not available with conv '" ⊕ [convchar] ⊕"'"
+
+      (w,f) = fromMaybe (0,'!') fill_
+
+      infix_op = infixOp '(%.) (fillOp (w,f,mod ≡ MOD_COMMIFY)) t
+
+  in
+    checkCommaValid infix_op
 
 ----------------------------------------
 
 -- create a fill expression
-fillIt ∷ Name → Integer → Char → ExpQ
-fillIt direction width chr =
-  appE (appE (varE direction) (litE (integerL width))) (litE $ charL chr)
+fillIt ∷ Name → ℤ → ℂ → ExpQ
+fillIt direction width c =
+  appE (appE (varE direction) (litE (integerL width))) (litE $ charL c)
 
-{- | Transform a `LazyText` transformer to a `Builder`. -}
+fillIt' ∷ Name → ℂ → ℤ → ExpQ
+fillIt' f c n =
+  appE (varE 'buildLTFormatter)
+       (appE (appE (varE f) (litE $ charL c)) (litE (integerL n)))
+
+{- | Transform a `LT` transformer to a `Builder`. -}
 buildLTTrans ∷ Buildable ρ ⇒
-               (LazyText.Text → LazyText.Text) → ρ → LazyBuilder.Builder
+               (LT.Text → LT.Text) → ρ → LazyBuilder.Builder
 buildLTTrans f =
   LazyBuilder.fromLazyText ∘ f ∘ LazyBuilder.toLazyText ∘ Buildable.build
 
 buildLTFormatter ∷ Buildable ρ ⇒
-                   (LazyText.Text → LazyText.Text) → Format α (ρ → α)
+                   (LT.Text → LT.Text) → Format α (ρ → α)
 buildLTFormatter = later ∘ buildLTTrans
 
 {- | Apply a text transformation to each line of a piece of text. -}
-eachLine ∷ Buildable ρ ⇒ (LazyText.Text → LazyText.Text) → Format α (ρ → α)
+eachLine ∷ Buildable ρ ⇒ (LT.Text → LT.Text) → Format α (ρ → α)
 eachLine f =
   -- we split & intercalate rather than lines/unlines, because the latter is
   -- lossy where the last "line" does or does not end in a newline
-  buildLTFormatter $ LazyText.intercalate "\n" ∘ fmap f ∘ LazyText.split (≡'\n')
+  buildLTFormatter $ LT.intercalate "\n" ∘ fmap f ∘ LT.split (≡'\n')
 
 {- | Pad out each line to (to the left) a given width with a given character. -}
-lefts ∷ Buildable ρ ⇒ Integer → Char → Format α (ρ → α)
-lefts k c = eachLine (LazyText.justifyRight (fromIntegral k) c)
+lefts ∷ Buildable ρ ⇒ ℤ → ℂ → Format α (ρ → α)
+lefts k c = eachLine (LT.justifyRight (fromIntegral k) c)
+
+{-| This will only work with numbers… -}
+commify ∷ ℂ → ℤ → LT.Text → LT.Text
+commify c i t =
+  let (l,r) = LT.breakOn "." t
+  in  if "" ≡ r
+      then commifyL c i l
+      else commifyL c i l ⊕ "." ⊕ commifyR c i (LT.tail r)
+
+{-| Insert a comma inbetween every three digits, from the right.
+    If `i` is non-zero, the result will have 'c's added to ensure the minimum
+    width.  If 'c' ≡ '0', and i > 0, that padding will be subject to
+    commification. Note that the final pad group may have four '0's, to avoid
+    leading with a comma.
+-}
+commifyL ∷ ℂ → ℤ → LT.Text → LT.Text
+commifyL c i t =
+  let
+    t' = -- t, commified (from the right, working left; as is standard with
+         -- integers)
+         LT.intercalate "," $ LT.reverse ⊳ reverse(LT.chunksOf 3 $ LT.reverse t)
+    i' = fromIntegral i
+  in
+    if c ≡ '0' ∧ i > 0
+    then if fromIntegral (LT.length t') < i
+         then let c'  = LT.singleton c
+                  c'' = LT.replicate 3 c'
+                  s   = if c ≡ ' ' then " " else ","
+                  p   = LT.takeWhile isDigit t'
+                  p'  = s ⊕ LT.replicate (3-LT.length p) c'
+                  t'' = LT.takeEnd i' $ LT.replicate i' (s ⊕ c'') ⊕ p' ⊕ t'
+              in  if ',' ≡ LT.head t''
+                  then c' ⊕ LT.tail t''
+                  else t''
+         else t'
+    else if i < 0
+         then LT.justifyLeft (abs i') c t'
+         else LT.justifyRight (abs i') c t'
+
+{-| Rightwards commify, for use after a decimal point. -}
+commifyR ∷ ℂ → ℤ → LT.Text → LT.Text
+commifyR c i t =
+  let
+    t' = LT.intercalate "," (LT.chunksOf 3 t)
+  in
+    if fromIntegral (LT.length t') < i
+    then let c'  = LT.singleton c
+             c'' = LT.replicate 3 c'
+             s   = if c ≡ ' ' then " " else ","
+             p   = LT.takeWhileEnd isDigit t'
+             p'  = LT.replicate (3-LT.length p) c' ⊕ s
+             t'' = LT.take (fromIntegral i) $ t' ⊕ p' ⊕ LT.replicate (fromIntegral i) c''
+         in  if ',' ≡ LT.last t''
+             then LT.init t'' ⊕ c'
+             else t''
+    else t'
 
 {- | Pad out each line to (to the right) a given width with a given character.-}
-rights ∷ Buildable ρ ⇒ Integer → Char → Format α (ρ → α)
-rights k c = eachLine (LazyText.justifyLeft (fromIntegral k) c)
+rights ∷ Buildable ρ ⇒ ℤ → ℂ → Format α (ρ → α)
+rights k c = eachLine (LT.justifyLeft (fromIntegral k) c)
 
 -- | conversion fill; -x → left, (+)x → right
 
-fillOp ∷ (Integer,Char) → ExpQ
-fillOp (i,c) | i < 0     = fillIt 'rights (abs i) c
-             | i > 0     = fillIt 'lefts       i  c
-             | otherwise = -- i ≡ 0 : something's gone wrong!
-                           error "cannot fill with size 0"
+fillOp ∷ (ℤ,ℂ,𝔹) → ExpQ
+fillOp (i,s,𝕱) | i < 0     = fillIt 'rights (abs i) s
+               | otherwise = fillIt 'lefts       i  s
+-- XXX commify everywhere
+-- XXX permit commification only for numerics (implementation won't work, and
+--     what should we do?; for non-numerics)
+-- XXX simplify tokOp
+-- XXX test float , padding
+-- XXX test other convchars
+-- XXX get rid of fillIt (not fillIt')
+-- XXX get rid of rights, lefts?
+-- XXX add tests that only d & friends support commafication
+fillOp (i,c,𝕿) | i < 0     = fillIt' 'commify c i
+               | otherwise = fillIt' 'commify  c i
 ----------------------------------------
 
 toTextF ∷ Printable t ⇒ Format r (t → r)
@@ -460,6 +550,13 @@ toFormatBytes b = later $ LazyBuilder.fromText ∘ formatBytes b
    >>> [fmtT|[%-3s]|] "a"
    "[a  ]"
 
+   Some numeric specificiers may have a ',' preceding the pad (if any), to cause
+   the number to have a comma inserted every three digits.  If there is a
+   positive pad value, and the pad character is '0', then that is also subject
+   to commification.  In this instance, the first four characters may be a '0' -
+   we elide the comma there, to ensure that the first character is not itself
+   a comma.
+
    Where noted below, some specifiers also allow a precision (after a 'decimal
    point').
 
@@ -467,7 +564,7 @@ toFormatBytes b = later $ LazyBuilder.fromText ∘ formatBytes b
            `Printable`, joined with ',', thus
            @ (`Foldable` φ, Printable τ) ⇒ φ intercalate "," (fmap toText τ) @
 
-   [@l@] - LazyText `LazyText.Text`
+   [@l@] - LazyText `LT.Text`
 
    [@s@] - `String`
 
@@ -514,7 +611,7 @@ toFormatBytes b = later $ LazyBuilder.fromText ∘ formatBytes b
                          >>> [fmtT|[%-.1e]|] (0.314 ∷ Float)
                          "[3.1e-1]"
 
-   [@y@] - `Integral` α ⇒ Render as bytes, with a 2^10 multiplier.  This tries
+   [@y@] - `Integral` α ⇒ Render as bytes, with a 10^3 multiplier.  This tries
                            to fit the value into 7 characters.
 
                            >>> [fmtT|%y|] (1024^(2∷Int) ∷ Integer)
@@ -562,68 +659,69 @@ toFormatBytes b = later $ LazyBuilder.fromText ∘ formatBytes b
            `Printable`, which are shell-quoted like @q@, and joined with ' '.
 -}
 
-{- | Character op: non-Nothing precision causes error. -}
-charOpNoPrecision ∷ ExpQ → Char → 𝕄 Natural → 𝕄 𝕋 → ExpQ
-charOpNoPrecision f _ Nothing Nothing = f
-charOpNoPrecision _ chr (Just prec) Nothing =
+{- | Character op: non-𝕹 precision causes error. -}
+charOpNoPrecision ∷ ExpQ → ℂ → 𝕄 ℕ → 𝕄 𝕋 → ExpQ
+charOpNoPrecision f _ 𝕹 𝕹 = f
+charOpNoPrecision _ chr (𝕵 prec) 𝕹 =
   error $ ю [ "conversion char '", [chr], "' does not admit precision ("
             , show prec, ")" ]
-charOpNoPrecision _ chr Nothing (Just t) =
+charOpNoPrecision _ chr 𝕹 (𝕵 t) =
   error $ ю [ "conversion char '", [chr], "' admits no text ({", unpack t,"})" ]
-charOpNoPrecision _ chr (Just prec) (Just t) =
+charOpNoPrecision _ chr (𝕵 prec) (𝕵 t) =
   error $ ю [ "conversion char '", [chr], "' admits neither precision ("
             , show prec, ")", " nor text ({", unpack t
             , "})" ]
 
 {- | Conversion character as formatter; e.g., 't' → stext; takes fill width &
      precision too, lest that affect the conversion. -}
-charOp ∷ Char          -- ^ conversion character (typically for errmsgs)
-       → 𝕄 Integer -- ^ fill width
-       → 𝕄 Natural -- ^ precision
-       → 𝕄 𝕋    -- ^ optional text (between {}) (unused in charOp)
+charOp ∷ ℂ        -- ^ conversion character (mostly for errmsgs)
+       → Modifier -- ^ conversion modifier, e.g., ',' for commafication
+       → 𝕄 ℤ     -- ^ fill width
+       → 𝕄 ℕ     -- ^ precision
+       → 𝕄 𝕋     -- ^ optional text (between {}) (unused in charOp)
        → ExpQ
 
 -- list (foldable), joined with ','
-charOp c@'L' _ p t = charOpNoPrecision (varE 'toTextListF) c p t
+charOp c@'L' _ _ p t = charOpNoPrecision (varE 'toTextListF) c p t
 -- lazy text
-charOp c@'l' _ p t = charOpNoPrecision (varE 'text) c p t
-charOp c@'s' _ p t = charOpNoPrecision (varE 'Formatters.string) c p t
-charOp c@'t' _ p t = charOpNoPrecision (varE 'stext) c p t
-charOp c@'T' _ p t = charOpNoPrecision (varE 'toTextF) c p t
-charOp c@'q' _ p t = charOpNoPrecision (varE 'toShell) c p t
-charOp c@'w' _ p t = charOpNoPrecision (varE 'shown) c p t
+charOp c@'l' _ _ p t = charOpNoPrecision (varE 'text) c p t
+charOp c@'s' _ _ p t = charOpNoPrecision (varE 'Formatters.string) c p t
+charOp c@'t' _ _ p t = charOpNoPrecision (varE 'stext) c p t
+charOp c@'T' _ _ p t = charOpNoPrecision (varE 'toTextF) c p t
+charOp c@'q' _ _ p t = charOpNoPrecision (varE 'toShell) c p t
+charOp c@'w' _ _ p t = charOpNoPrecision (varE 'shown) c p t
 
 -- list (foldable) of shell-quoted things, joined with ' '
-charOp c@'Q' _ p t = charOpNoPrecision (varE 'toShellList) c p t
+charOp c@'Q' _ _ p t = charOpNoPrecision (varE 'toShellList) c p t
 
 
-charOp c@'d' _ p t = charOpNoPrecision (varE 'int) c p t
-charOp c@'x' _ p t = charOpNoPrecision (varE 'hex) c p t
-charOp c@'b' _ p t = charOpNoPrecision (varE 'bin) c p t
-charOp c@'o' _ p t = charOpNoPrecision (varE 'oct) c p t
-charOp c@'n' _ p t = charOpNoPrecision (varE 'tonum) c p t
+charOp c@'d' _ _ p t = charOpNoPrecision (varE 'int) c p t
+charOp c@'x' _ _ p t = charOpNoPrecision (varE 'hex) c p t
+charOp c@'b' _ _ p t = charOpNoPrecision (varE 'bin) c p t
+charOp c@'o' _ _ p t = charOpNoPrecision (varE 'oct) c p t
+charOp c@'n' _ _ p t = charOpNoPrecision (varE 'tonum) c p t
 
-charOp 'f' _ _ (Just t) =
+charOp 'f' _ _ _ (𝕵 t) =
   error $ "conversion char 'f' admits no text ({" ⊕ unpack t ⊕ "})"
-charOp 'f' _ Nothing  Nothing = varE 'floatmin
-charOp 'f' _ (Just i) Nothing =
+charOp 'f' _ _ 𝕹  𝕹 = varE 'floatmin
+charOp 'f' _ _ (𝕵 i) 𝕹 =
   appE (varE 'fixed) (litE (integerL $ fromIntegral i))
-charOp 'e' _ Nothing  Nothing = appE (varE 'expt) (litE (integerL 0))
-charOp 'e' _ (Just i) Nothing = appE
+charOp 'e' _ _ 𝕹  𝕹 = appE (varE 'expt) (litE (integerL 0))
+charOp 'e' _ _ (𝕵 i) 𝕹 = appE
   (varE 'expt) (litE (integerL $ fromIntegral i))
 
-charOp c@'y' _ p t =
+charOp c@'y' _ _ p t =
   charOpNoPrecision (appE (varE 'toFormatBytes) (conE 'B_1000)) c p t
-charOp c@'Y' _ p t =
+charOp c@'Y' _ _ p t =
   charOpNoPrecision (appE (varE 'toFormatBytes) (conE 'B_1024)) c p t
 
-charOp c@'z' _ p t = charOpNoPrecision (varE 'toFormatUTC) c p t
-charOp c@'Z' _ p t = charOpNoPrecision (varE 'toFormatUTCDoW) c p t
+charOp c@'z' _ _ p t = charOpNoPrecision (varE 'toFormatUTC) c p t
+charOp c@'Z' _ _ p t = charOpNoPrecision (varE 'toFormatUTCDoW) c p t
 
-charOp c@'k' _ p t = charOpNoPrecision (varE 'toFormatStackHead) c p t
-charOp c@'K' _ p t = charOpNoPrecision (varE 'toFormatCallStack) c p t
+charOp c@'k' _ _ p t = charOpNoPrecision (varE 'toFormatStackHead) c p t
+charOp c@'K' _ _ p t = charOpNoPrecision (varE 'toFormatCallStack) c p t
 
-charOp x _ _ _ = error $ "bad conversion char'" ⊕ [x] ⊕ "'"
+charOp x _ _ _ _ = error $ "bad conversion char '" ⊕ [x] ⊕ "'"
 
 floatmin ∷ Real α ⇒ Format r (α → r)
 floatmin = let dropper = dropWhileEnd (`elem` (".0" ∷ 𝕊))
@@ -634,7 +732,7 @@ tonum = mapf toNumI int
 
 expt ∷  RealFloat α ⇒ Int → Format r (α → r)
 expt i = later (\ f →
-  let (m,e ∷ Integer) = decompose f
+  let (m,e ∷ ℤ) = decompose f
    in LazyBuilder.fromText $ (sformat $ (fixed i % "e" % int)) m e)
 
 
@@ -656,7 +754,7 @@ decompose val = let (mant2,ex2) = decodeFloat val
 
 -- | infix a function between two values
 infixOp ∷ Name → ExpQ → ExpQ → ExpQ
-infixOp op l r = infixE (Just l) (varE op) (Just r)
+infixOp op l r = infixE (𝕵 l) (varE op) (𝕵 r)
 
 ----------------------------------------
 
@@ -719,7 +817,7 @@ class FormatTarget t where
 instance FormatTarget 𝕋 where
   output = sformat
 
-instance FormatTarget LazyText.Text where
+instance FormatTarget LT.Text where
   output = format
 
 instance FormatTarget 𝕊 where

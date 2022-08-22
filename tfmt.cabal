@@ -54,6 +54,11 @@ library
   -- modules included in this library but not exported.
   other-modules:    Text.Fmt.Token
 
+  default-extensions: OverloadedStrings
+                    , PatternSynonyms
+                    , QuasiQuotes
+                    , TemplateHaskell
+                    , UnicodeSyntax
   -- LANGUAGE extensions used by modules in this package.
   -- other-extensions:
 
