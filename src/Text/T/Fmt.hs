@@ -135,7 +135,13 @@ commifyTests =
         , check8   "7,654,321"   "7654321"
         , check8  "87,654,321"  "87654321"
         , check8 "987,654,321" "987654321"
-        , testCase "7777" $ "0,007,777" @=? commify '0' 9 "7777"
+        , testCase "7777 (9)"  $ "0,007,777"   @=? commify '0' 9 "7777"
+        , testCase "7777.7777" $ "7,777.777,7" @=? commify '0' 0 "7777.7777"
+        , testCase "7777.7777" $ "0007,777.777,7" @=? commify '0' 14 "7777.7777"
+        , testCase "10.00e5000" $ "10.00e5,000" @=? commify '0' 0 "10.00e5000"
+        , testCase "10.00e6000" $
+            "0,010.00e6,000" @=? commify '0' 14 "10.00e6000"
+        , testCase "10.00e7000" $ "   10.00e7,000" @=? commify ' ' 14 "10.00e7000"
         ]
 
 commifyRTests ∷ TestTree
@@ -328,10 +334,6 @@ fmtTest =
     , testCase ",7777@-7" $ [fmt|%,-7d|] (7777 ∷ Int) @?= ("7,777  " ∷ Text)
     , testCase ",7777@-8" $ [fmt|%,-8d|] (7777 ∷ Int) @?= ("7,777   " ∷ Text)
     , testCase ",7777@-9" $ [fmt|%,-9d|] (7777 ∷ Int) @?= ("7,777    " ∷ Text)
--- formatters `commas` uses an integral value; we can do something with floats
--- by splitting them up, perhaps, but we'll need to do something like splitting
--- up the number into "whole number" and fractional parts
---    , testCase ",777" $ [fmt|%,08.2f|] (777.21 ∷ Float) @?= ("0,777.21" ∷ Text)
 
     , testCase "a%3dc: 7" $ [fmt|a%3dc|]  (7 ∷ Int)      @?= ("a  7c" ∷ Text)
     , testCase "a%3dc:-7" $ [fmt|a%3dc|] (-7 ∷ Int)      @?= ("a -7c" ∷ Text)
@@ -344,14 +346,18 @@ fmtTest =
     , testCase "a%3xc"  $ [fmt|a%3xc|]   (175 ∷ Int)     @?= ("a afc" ∷ Text)
     , testCase "a%-3xc" $ [fmt|a%-3xc|]  (175 ∷ Integer) @?= ("aaf c" ∷ Text)
     , testCase "a%03xc" $ [fmt|a%03xc|]  (175 ∷ Int)     @?= ("a0afc" ∷ Text)
+    , testCase "a%,xc"  $ [fmt|a%,xc|] (46175 ∷ Int)     @?= ("ab,45fc" ∷ Text)
 
-    , testCase "a%3oc"  $ [fmt|a%3oc|]  (175 ∷ Int)     @?= ("a257c"  ∷ Text)
-    , testCase "a%-4oc" $ [fmt|a%-4oc|] (175 ∷ Integer) @?= ("a257 c" ∷ Text)
-    , testCase "a%04oc" $ [fmt|a%04oc|] (175 ∷ Int)     @?= ("a0257c" ∷ Text)
+    , testCase "a%3oc"   $ [fmt|a%3oc|]   (175 ∷ Int)     @?= ( "a257c"  ∷ Text)
+    , testCase "a%-4oc"  $ [fmt|a%-4oc|]  (175 ∷ Integer) @?= ( "a257 c" ∷ Text)
+    , testCase "a%04oc"  $ [fmt|a%04oc|]  (175 ∷ Int)     @?= ( "a0257c" ∷ Text)
+    , testCase "a%,04oc" $ [fmt|a%,04oc|] (175 ∷ Int)     @?= ( "a0257c" ∷ Text)
+    , testCase "a%,05oc" $ [fmt|a%,05oc|] (175 ∷ Int)     @?= ("a0,257c" ∷ Text)
 
-    , testCase "%04b"     $ [fmt|%04b|]      (6 ∷ Int)  @?= ("0110" ∷ Text)
-    , testCase "%-4b"     $ [fmt|%-4b|]      (6 ∷ Int)  @?= ("110 " ∷ Text)
-    , testCase "%2b"      $ [fmt|%2b|]       (6 ∷ Int)  @?= ( "110" ∷ Text)
+    , testCase "%04b"     $ [fmt|%04b|]      (6 ∷ Int)  @?= (   "0110" ∷ Text)
+    , testCase "%-4b"     $ [fmt|%-4b|]      (6 ∷ Int)  @?= (   "110 " ∷ Text)
+    , testCase "%2b"      $ [fmt|%2b|]       (6 ∷ Int)  @?= (    "110" ∷ Text)
+    , testCase "%,6b"     $ [fmt|%,6b|]     (14 ∷ Int)  @?= ( " 1,110" ∷ Text)
 
     , testCase "%f 6"       $ [fmtT|%f|]          (6 ∷ Int)    @?= "6"
     , testCase "%f 6.5"     $ [fmtT|%f|]        (6.5 ∷ Float)  @?= "6.5"
@@ -372,11 +378,13 @@ fmtTest =
 
     , testCase "%3n"     $ [fmtT|%3n|]    (6 ∷ Int)       @?=  "  6"
     , testCase "%3n"     $ [fmtT|%3n|]    (6 ∷ Word8)     @?=  "  6"
+    , testCase "%3n"     $ [fmtT|%3n|]    (6 ∷ Word8)     @?=  "  6"
 
     , testCase "%e"     $ [fmtT|%e|]       (1000000 ∷ Double)  @?=      "10e5"
     , testCase "%.2e"   $ [fmtT|%.2e|]     (1000000 ∷ Double)  @?=   "10.00e5"
     , testCase "%5.2e"  $ [fmtT|%5.2e|]    (9999999 ∷ Double)  @?=   "10.00e6"
-    , testCase "%7.2e"  $ [fmtT|%9.2e|]    (1000000 ∷ Double)  @?= "  10.00e5"
+    , testCase "%9.2e"  $ [fmtT|%9.2e|]    (1000000 ∷ Double)  @?= "  10.00e5"
+    , testCase "%,9.2e" $ [fmtT|%,9.2e|]   (1000000 ∷ Double)  @?= "  10.00e5"
 
     , testCase "fmtS"         $ [fmtS|a%03tc|] "b" @?= ("a00bc" ∷ String)
     , testCase "as string"    $ [fmtS|a%03tc|] "b" @?=  "a00bc"
@@ -396,10 +404,10 @@ fmtTest =
     , testCase "0 B" $ [fmt|%y|] (0 ∷ Int) @?= ("0" ∷ Text)
     , testCase "500 b" $ [fmt|%y|] (500 ∷ Int) @?= ("500B" ∷ Text)
     , testCase "500 B" $ [fmt|%Y|] (500 ∷ Int) @?= ("500B" ∷ Text)
-    , testCase "1000 b" $ [fmt|%y|] (1000 ∷ Int) @?= ("1.00kB" ∷ Text)
-    , testCase "1000 B" $ [fmt|%Y|] (1000 ∷ Int) @?= ("1000B" ∷ Text)
-    , testCase "1024 b" $ [fmt|%y|] (1024 ∷ Int) @?= ("1.02kB" ∷ Text)
-    , testCase "1024 B" $ [fmt|%Y|] (1024 ∷ Int) @?= ("1.00KiB" ∷ Text)
+    , testCase "1000 b"  $ [fmt|%y|] (1000 ∷ Int) @?= ("1.00kB" ∷ Text)
+    , testCase "1000 B"  $ [fmt|%Y|] (1000 ∷ Int) @?= ("1000B" ∷ Text)
+    , testCase "1024 b"  $ [fmt|%y|] (1024 ∷ Int) @?= ("1.02kB" ∷ Text)
+    , testCase "1024 B"  $ [fmt|%Y|] (1024 ∷ Int) @?= ("1.00KiB" ∷ Text)
     , testCase "5000 b" $ [fmt|%y|] (5000 ∷ Int) @?= ("5.00kB" ∷ Text)
     , testCase "5000 B" $ [fmt|%Y|] (5000 ∷ Int) @?= ("4.88KiB" ∷ Text)
     , testCase "1000000 b" $ [fmt|%y|] (1000000 ∷ Int) @?= ("1.00MB" ∷ Text)

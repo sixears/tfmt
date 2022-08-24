@@ -343,9 +343,9 @@ sprintf_ ∷ Name → 𝕋 → ExpQ
 sprintf_ fnam t =
   case tokens t of
     𝕷 e    → error $ show e
-    𝕽 toks → appE (varE fnam) $
-               foldr conjoin (litE $ stringL "") (fmap tokOp toks)
-             where conjoin = infixOp '(%)
+    𝕽 toks → appE (varE fnam) $ foldr conjoin emptyStr (fmap tokOp toks)
+             where conjoin  = infixOp '(%)
+                   emptyStr = litE $ stringL ""
 
 {- | Implement a token.  Regular strings pass through; conversions ("%…") are
      implemented, and padded as necessary.
@@ -355,23 +355,16 @@ tokOp ∷ Token → ExpQ
 -- literal string
 tokOp (Str s) = litE $ stringL s
 -- conversion, no padding
-tokOp (Conversion mod fill_ prec txt convchar) =
-  let CharOp op = Map.findWithDefault badconv convchar charOps
-                 where badconv = error $ "bad conversion char '" ⊕ [convchar] ⊕ "'"
-      t = op convchar mod (fst ⊳ fill_) prec txt -- charOp convchar mod (fst ⊳ fill_) prec txt
-
-
-      checkCommaValid x =
-        if mod ≡ MOD_NONE ∨ convchar ∈ "dfnxboeyY"
-        then x
-        else error $ "commafication not available with conv '" ⊕ [convchar] ⊕"'"
-
+tokOp (Conversion mod fill_ prec txt convc) =
+  let CharOp op = Map.findWithDefault badconv convc charOps
+                  where badconv = error $ "bad conversion char '" ⊕ [convc] ⊕"'"
+      t = op convc mod (fst ⊳ fill_) prec txt
       (w,f) = fromMaybe (0,'!') fill_
-
-      infix_op = infixOp '(%.) (fillOp (w,f,mod ≡ MOD_COMMIFY)) t
-
   in
-    checkCommaValid infix_op
+    if mod ≡ MOD_NONE ∨ convc ∈ "dfnxboe"
+    then infixOp '(%.) (fillOp (w,f,mod ≡ MOD_COMMIFY)) t
+    else error $ "commafication not available with conv '" ⊕ [convc] ⊕"'"
+
 
 ----------------------------------------
 
@@ -409,10 +402,15 @@ lefts k c = eachLine (LT.justifyRight (fromIntegral k) c)
 {-| This will only work with numbers… -}
 commify ∷ ℂ → ℤ → LT.Text → LT.Text
 commify c i t =
-  let (l,r) = LT.breakOn "." t
-  in  if "" ≡ r
-      then commifyL c i l
-      else commifyL c i l ⊕ "." ⊕ commifyR c i (LT.tail r)
+  let length = fromIntegral ∘ LT.length
+  in  case LT.breakOn "e" t of
+        (_,"") → case LT.breakOn "." t of
+                   (_,"") → commifyL c i t
+                   (l,r)  → let r' = commifyR c 0 (LT.tail r)
+                            in  commifyL c (max 0 $ i - length r' - 1) l ⊕"."⊕r'
+        (m,e) → let e' = commifyL '¡' 0 (LT.tail e)
+                    m' = commify c (max 0 $ i - length e' - 1) m
+                 in m' ⊕ "e" ⊕ e'
 
 {-| Insert a comma inbetween every three digits, from the right.
     If `i` is non-zero, the result will have 'c's added to ensure the minimum
@@ -471,10 +469,7 @@ rights k c = eachLine (LT.justifyLeft (fromIntegral k) c)
 fillOp ∷ (ℤ,ℂ,𝔹) → ExpQ
 fillOp (i,s,𝕱) | i < 0     = fillIt 'rights (abs i) s
                | otherwise = fillIt 'lefts       i  s
--- XXX commify everywhere
--- XXX permit commification only for numerics (implementation won't work, and
---     what should we do?; for non-numerics)
--- XXX simplify tokOp
+-- XXX use text.parser / trifecta rather than parsec
 -- XXX test float , padding
 -- XXX test other convchars
 -- XXX get rid of fillIt (not fillIt')
@@ -644,7 +639,12 @@ charOpNoPrecision _ chr (𝕵 prec) (𝕵 t) =
             , show prec, ")", " nor text ({", unpack t
             , "})" ]
 
+------------------------------------------------------------
+
+-- second tuple member is whether commafication is supported
 newtype CharOp = CharOp (ℂ → Modifier → (𝕄 ℤ) → (𝕄 ℕ) → (𝕄 𝕋) → ExpQ)
+
+----------------------------------------
 
 {- | Conversion character as formatter; e.g., 't' → stext; takes fill width &
      precision too, lest that affect the conversion. -}
@@ -693,18 +693,25 @@ charOps = Map.fromList $
     , ('K', no_prec ⟦ toFormatCallStack ⟧)
     ]
 
+----------------------------------------
+
 floatmin ∷ Real α ⇒ Format r (α → r)
 floatmin = let dropper = dropWhileEnd (`elem` (".0" ∷ 𝕊))
             in later $ LazyBuilder.fromText ∘ dropper ∘ sformat shortest
 
+----------------------------------------
+
 tonum ∷ ToNum α ⇒ Format r (α → r)
 tonum = mapf toNumI int
+
+----------------------------------------
 
 expt ∷  RealFloat α ⇒ Int → Format r (α → r)
 expt i = later (\ f →
   let (m,e ∷ ℤ) = decompose f
    in LazyBuilder.fromText $ (sformat $ (fixed i % "e" % int)) m e)
 
+----------------------------------------
 
 -- | decompose a Real value into "engineering" notation; a mantissa between
 --   (-10,10) and an exponent, as a power of 10
