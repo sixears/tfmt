@@ -70,8 +70,8 @@ library
 
   -- Other library packages from which modules are imported.
   build-depends: base, containers, data-textual, formatting, lens, parsec
-               , process, template-haskell, tasty, tasty-hunit, text
-               , text-format, text-printer, time
+               , parsers, process, template-haskell, tasty, tasty-hunit, text
+               , text-format, text-printer, time, trifecta
 
                , base0t           >= 0.0.1.0
                , has-callstack    >= 1.0.1.0

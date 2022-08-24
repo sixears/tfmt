@@ -90,14 +90,19 @@ import Number  ( ToNum( toNumI ) )
 
 -- parsec ------------------------------
 
-import Text.Parsec.Char        ( char, digit, noneOf, oneOf, string )
-import Text.Parsec.Combinator  ( eof, many1, option, optionMaybe )
+-- import Text.Parsec.Char        ( char, digit, noneOf, oneOf, string )
+-- import Text.Parsec.Combinator  ( eof, many1, option, optionMaybe )
 import Text.Parsec.Error       ( ParseError )
-import Text.Parsec.Prim        ( (<?>), parse, try )
+import Text.Parsec.Prim        ( parse )
 
 -- parsec-plus-base --------------------
 
 import ParsecPlusBase  ( Parser, boundedDoubledChars )
+
+-- parsers -----------------------------
+
+import Text.Parser.Char         ( char, digit, noneOf, oneOf, string )
+import Text.Parser.Combinators  ( Parsing, (<?>), eof, option, optional, try )
 
 -- process -----------------------------
 
@@ -128,6 +133,10 @@ import Data.Text.Buildable  as  Buildable
 import Data.Time.Clock   ( UTCTime )
 import Data.Time.Format  ( defaultTimeLocale, formatTime )
 
+-- trifecta ----------------------------
+
+import Text.Trifecta.Parser  ( parseString )
+
 ------------------------------------------------------------
 --                     local imports                      --
 ------------------------------------------------------------
@@ -136,6 +145,9 @@ import Text.Fmt.Token  ( Modifier( MOD_NONE, MOD_COMMIFY )
                        , Token( Conversion, Str ) )
 
 -------------------------------------------------------------------------------
+
+(⩻) ∷ Parsing η ⇒ η α → 𝕊 → η α
+(⩻) = (<?>)
 
 -- | tokenize a string into strings & conversions
 tokens ∷ 𝕋 → 𝔼 ParseError [Token]
@@ -162,10 +174,10 @@ tokenP = many (simpleStr ∤ try escapePC ∤ try escapeSlash ∤ conversion)
 conversion ∷ Parser Token
 conversion =
   Conversion ⊳ (string "%" ⋫ option MOD_NONE (char ',' ⋫pure MOD_COMMIFY))
-             ⊵ optionMaybe fill
-             ⊵ optionMaybe precision
-             ⊵ optionMaybe (pack ⊳ boundedDoubledChars '{' '}')
-             ⊵ (oneOf "bdefIkKlLnoqQstTwxyYzZ" <?> "valid conversion char")
+             ⊵ optional fill
+             ⊵ optional precision
+             ⊵ optional (pack ⊳ boundedDoubledChars '{' '}')
+             ⊵ (oneOf "bdefIkKlLnoqQstTwxyYzZ" ⩻ "valid conversion char")
 
 ----------------------------------------
 
@@ -188,7 +200,7 @@ precision = read ⊳ (char '.' ⋫ many digit)
 
 -- | parser for an unadorned string (without any % chars)
 simpleStr ∷ Parser Token
-simpleStr = Str ⊳ many1 (noneOf "%\\")
+simpleStr = Str ⊳ some (noneOf "%\\")
 
 ----------------------------------------
 
@@ -447,6 +459,8 @@ commifyR ∷ ℂ → ℤ → LT.Text → LT.Text
 commifyR c i t =
   let
     t' = LT.intercalate "," (LT.chunksOf 3 t)
+    take = LT.take ∘ fromIntegral
+    replicate = LT.replicate ∘ fromIntegral
   in
     if fromIntegral (LT.length t') < i
     then let c'  = LT.singleton c
@@ -454,7 +468,7 @@ commifyR c i t =
              s   = if c ≡ ' ' then " " else ","
              p   = LT.takeWhileEnd isDigit t'
              p'  = LT.replicate (3-LT.length p) c' ⊕ s
-             t'' = LT.take (fromIntegral i) $ t' ⊕ p' ⊕ LT.replicate (fromIntegral i) c''
+             t'' = take i $ t' ⊕ p' ⊕ replicate i c''
          in  if ',' ≡ LT.last t''
              then LT.init t'' ⊕ c'
              else t''
