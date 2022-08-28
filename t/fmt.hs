@@ -22,4 +22,4 @@ main :: IO ()
 main = defaultMain tests
 
 tests :: TestTree
-tests = testGroup "fmt" [ Fmt.unitTests ]
+tests = testGroup "fmt" [ Fmt.tests ]

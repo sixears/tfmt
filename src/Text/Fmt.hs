@@ -76,11 +76,10 @@ import Control.Lens  ( view )
 import Data.MoreUnicode.Applicative  ( (∤), (⋪), (⋫), (⊵) )
 import Data.MoreUnicode.Bool         ( 𝔹, pattern 𝕿, pattern 𝕱 )
 import Data.MoreUnicode.Char         ( ℂ )
-import Data.MoreUnicode.Either       ( 𝔼, pattern 𝕷, pattern 𝕽 )
 import Data.MoreUnicode.Functor      ( (⊳) )
 import Data.MoreUnicode.Lens         ( (⊣) )
 import Data.MoreUnicode.Maybe        ( 𝕄, pattern 𝕵, pattern 𝕹 )
-import Data.MoreUnicode.Monoid       ( ю )
+import Data.MoreUnicode.Monoid       ( ю, ф )
 import Data.MoreUnicode.String       ( 𝕊 )
 import Data.MoreUnicode.Text         ( 𝕋 )
 
@@ -88,21 +87,12 @@ import Data.MoreUnicode.Text         ( 𝕋 )
 
 import Number  ( ToNum( toNumI ) )
 
--- parsec ------------------------------
-
--- import Text.Parsec.Char        ( char, digit, noneOf, oneOf, string )
--- import Text.Parsec.Combinator  ( eof, many1, option, optionMaybe )
-import Text.Parsec.Error       ( ParseError )
-import Text.Parsec.Prim        ( parse )
-
--- parsec-plus-base --------------------
-
-import ParsecPlusBase  ( Parser, boundedDoubledChars )
-
 -- parsers -----------------------------
 
-import Text.Parser.Char         ( char, digit, noneOf, oneOf, string )
-import Text.Parser.Combinators  ( Parsing, (<?>), eof, option, optional, try )
+import Text.Parser.Char         ( CharParsing
+                                , char, digit, noneOf, oneOf, string )
+import Text.Parser.Combinators  ( Parsing, (<?>)
+                                , between, choice, eof, option, optional, try )
 
 -- process -----------------------------
 
@@ -136,6 +126,7 @@ import Data.Time.Format  ( defaultTimeLocale, formatTime )
 -- trifecta ----------------------------
 
 import Text.Trifecta.Parser  ( parseString )
+import Text.Trifecta.Result  ( Result( Failure, Success ) )
 
 ------------------------------------------------------------
 --                     local imports                      --
@@ -146,12 +137,28 @@ import Text.Fmt.Token  ( Modifier( MOD_NONE, MOD_COMMIFY )
 
 -------------------------------------------------------------------------------
 
+-- Copied from ParserPlus; to avoid circular import involving
+-- non-empty-containers
+
+betweenCs ∷ CharParsing η ⇒ ℂ → ℂ → η α → η α
+betweenCs l r = between (char l) (char r)
+
+doubledChar ∷ CharParsing η ⇒ [ℂ] → η ℂ
+doubledChar cs = (choice $ (\ c → char c ⋫ char c) ⊳ cs) ∤ noneOf cs
+
+doubledChars ∷ CharParsing η ⇒ [ℂ] → η 𝕊
+doubledChars cs = many (try $ doubledChar cs)
+
+boundedDoubledChars ∷ CharParsing η ⇒ ℂ → ℂ → η 𝕊
+boundedDoubledChars l r = betweenCs l r (doubledChars [l,r])
+
+------------------------------------------------------------
+
 (⩻) ∷ Parsing η ⇒ η α → 𝕊 → η α
 (⩻) = (<?>)
 
--- | tokenize a string into strings & conversions
-tokens ∷ 𝕋 → 𝔼 ParseError [Token]
-tokens s = concatTokens ⊳ parse (tokenP ⋪ eof) (unpack s) s
+tokens ∷ 𝕋 → Result [Token]
+tokens s = concatTokens ⊳ parseString (tokenP ⋪ eof) ф (unpack s)
 
 ----------------------------------------
 
@@ -165,25 +172,44 @@ concatTokens ts                    = ts
 ----------------------------------------
 
 -- | parse a string into tokens
-tokenP ∷ Parser [Token]
+tokenP ∷ CharParsing η ⇒ η [Token]
 tokenP = many (simpleStr ∤ try escapePC ∤ try escapeSlash ∤ conversion)
+         where -- | parser for an unadorned string (without any % chars)
+               simpleStr ∷ CharParsing η ⇒ η Token
+               simpleStr = Str ⊳ some (noneOf "%\\")
 
-----------------------------------------
+               -- | parser for an escaped '%' (represented in the incoming
+               --   string as "%%")
+               escapePC ∷ CharParsing η ⇒ η Token
+               escapePC = Str ⊳ const "%" ⊳ string "%%"
 
-{- | Parse a string into a conversion specifier. -}
-conversion ∷ Parser Token
+               -- | parser for slash escapes, e.g., \\, \n, \t
+               escapeSlash ∷ CharParsing η ⇒ η Token
+               escapeSlash = Str ∘ decode ⊳ (char '\\' ⋫ oneOf "nt\\")
+                             where decode 'n'  = "\n"
+                                   decode 't'  = "\t"
+                                   decode '\\' = "\\"
+                                   decode c    =
+                                     error $ ю [ "bad decode char: '",[c],"'" ]
+
+-- | parse a string into a conversion specifier
+conversion ∷ CharParsing η ⇒ η Token
 conversion =
-  Conversion ⊳ (string "%" ⋫ option MOD_NONE (char ',' ⋫pure MOD_COMMIFY))
+  Conversion ⊳ (string "%"
+                  ⋫ option MOD_NONE (char ',' ⋫pure MOD_COMMIFY))
              ⊵ optional fill
              ⊵ optional precision
              ⊵ optional (pack ⊳ boundedDoubledChars '{' '}')
              ⊵ (oneOf "bdefIkKlLnoqQstTwxyYzZ" ⩻ "valid conversion char")
 
+
+----------------------------------------
+
 ----------------------------------------
 
 {- | Parser for the fill spec of a conversion (the -07 of "%-07.4s", for
      example). -}
-fill ∷ Parser (ℤ, ℂ)
+fill ∷ CharParsing η ⇒ η (ℤ, ℂ)
 fill = (\ a b c d → (read (concat [a,[c],d]), b)) ⊳ option "" (string "-")
                                                   ⊵ option ' ' (char '0')
                                                   ⊵ oneOf "123456789"
@@ -193,30 +219,8 @@ fill = (\ a b c d → (read (concat [a,[c],d]), b)) ⊳ option "" (string "-")
 
 -- | parse for the precision part of a conversion (.2 of "%3.2f", for example)
 
-precision ∷ Parser ℕ
+precision ∷ CharParsing η ⇒ η ℕ
 precision = read ⊳ (char '.' ⋫ many digit)
-
-----------------------------------------
-
--- | parser for an unadorned string (without any % chars)
-simpleStr ∷ Parser Token
-simpleStr = Str ⊳ some (noneOf "%\\")
-
-----------------------------------------
-
--- | parser for an escaped '%' (represented in the incoming string as "%%")
-escapePC ∷ Parser Token
-escapePC = Str ⊳ const "%" ⊳ string "%%"
-
-----------------------------------------
-
--- | parser for slash escapes, e.g., \\, \n, \t
-escapeSlash ∷ Parser Token
-escapeSlash = Str ∘ decode ⊳ (char '\\' ⋫ oneOf "nt\\")
-              where decode 'n'  = "\n"
-                    decode 't'  = "\t"
-                    decode '\\' = "\\"
-                    decode c    = error $ ю [ "bad decode char: '", [c], "'" ]
 
 ----------------------------------------
 
@@ -354,10 +358,10 @@ sprintfL = sprintf_ 'format
 sprintf_ ∷ Name → 𝕋 → ExpQ
 sprintf_ fnam t =
   case tokens t of
-    𝕷 e    → error $ show e
-    𝕽 toks → appE (varE fnam) $ foldr conjoin emptyStr (fmap tokOp toks)
-             where conjoin  = infixOp '(%)
-                   emptyStr = litE $ stringL ""
+    Failure e    → error $ show e
+    Success toks → appE (varE fnam) $ foldr conjoin emptyStr (fmap tokOp toks)
+                   where conjoin  = infixOp '(%)
+                         emptyStr = litE $ stringL ""
 
 {- | Implement a token.  Regular strings pass through; conversions ("%…") are
      implemented, and padded as necessary.
@@ -483,12 +487,6 @@ rights k c = eachLine (LT.justifyLeft (fromIntegral k) c)
 fillOp ∷ (ℤ,ℂ,𝔹) → ExpQ
 fillOp (i,s,𝕱) | i < 0     = fillIt 'rights (abs i) s
                | otherwise = fillIt 'lefts       i  s
--- XXX use text.parser / trifecta rather than parsec
--- XXX test float , padding
--- XXX test other convchars
--- XXX get rid of fillIt (not fillIt')
--- XXX get rid of rights, lefts?
--- XXX add tests that only d & friends support commafication
 fillOp (i,c,𝕿) | i < 0     = fillIt' 'commify c i
                | otherwise = fillIt' 'commify  c i
 ----------------------------------------

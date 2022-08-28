@@ -6,50 +6,43 @@ module Text.T.Fmt
   ( _test, tests )
 where
 
+import Base0T
 import Prelude ( Double, Float, Int, Integer, (^) )
 
 -- base --------------------------------
 
-import Data.Bifunctor   ( first )
-import Data.Either      ( Either( Left, Right ) )
-import Data.Eq          ( Eq )
-import Data.Function    ( ($) )
-import Data.List        ( isInfixOf )
-import Data.Monoid      ( (<>) )
-import Data.String      ( String, unlines )
-import Data.Word        ( Word8 )
-import GHC.Stack        ( CallStack, SrcLoc( SrcLoc ), fromCallSiteList )
+import Data.String      ( unlines )
+import GHC.Stack        ( SrcLoc( SrcLoc ), fromCallSiteList )
 import Numeric.Natural  ( Natural )
-import System.IO        ( IO )
-import Text.Show        ( Show, show )
-
--- data-textual ------------------------
-
-import Data.Textual  ( Printable( print ) )
 
 -- more-unicode ------------------------
 
+import Data.MoreUnicode.Bool    ( pattern 𝕱 )
+import Data.MoreUnicode.Either  ( 𝔼, pattern 𝕷, pattern 𝕽 )
+import Data.MoreUnicode.Lens    ( (⩼) )
 import Data.MoreUnicode.Maybe   ( pattern 𝕵, pattern 𝕹 )
+import Data.MoreUnicode.Monoid  ( ф )
 import Data.MoreUnicode.String  ( 𝕊 )
 import Data.MoreUnicode.Text    ( 𝕋 )
 
--- parsec ------------------------------
+-- prettyprinter -----------------------
 
-import Text.Parsec.Prim   ( parse )
+import Prettyprinter.Render.Text  ( renderStrict )
+import Prettyprinter.Internal     ( defaultLayoutOptions, layoutPretty )
 
 -- tasty -------------------------------
 
-import Test.Tasty  ( TestTree, defaultMain, testGroup )
+import Test.Tasty  ( defaultMain )
 
 -- tasty-hunit -------------------------
 
-import Test.Tasty.HUnit  ( Assertion, (@=?), (@?=), assertBool, testCase )
+import Test.Tasty.HUnit  ( Assertion, (@?=), assertBool )
 
 -- text --------------------------------
 
 import qualified  Data.Text.Lazy  as  LT
 
-import Data.Text  ( Text, intercalate, unpack )
+import Data.Text  ( Text, intercalate, isInfixOf, unpack )
 
 -- text-printer ------------------------
 
@@ -58,6 +51,12 @@ import qualified  Text.Printer  as  P
 -- time --------------------------------
 
 import Data.Time.Clock.POSIX  ( posixSecondsToUTCTime )
+
+-- trifecta ----------------------------
+
+import Text.Trifecta.Parser  ( parseString )
+import Text.Trifecta.Result  ( ErrInfo, Result( Failure, Success )
+                             , _errDoc, _Success )
 
 ------------------------------------------------------------
 --                     local imports                      --
@@ -75,7 +74,7 @@ import Text.Fmt.Token  ( Modifier( MOD_COMMIFY, MOD_NONE )
 data TestToText = TestToText Text
 
 instance Printable TestToText where
-  print (TestToText t) = P.text $ "ttt: " <> t
+  print (TestToText t) = P.text $ "ttt: " ⊕ t
 
 ts ∷ [TestToText]
 ts =  [ TestToText "c", TestToText "b", TestToText "a" ]
@@ -93,7 +92,8 @@ tests = testGroup "Text.Fmt" [ fillTest, convTest, formatBytesTest
 convTest ∷ TestTree
 convTest =
   testGroup "conversion" $
-    let testConv t expect = testCase t $ parse conversion t t @?= Right expect
+    let testConv t expect =
+          testCase t $ parseString conversion ф t ⩼ _Success @?= 𝕵 expect
       in [ testConv "%t"      (Conversion MOD_NONE 𝕹 𝕹 𝕹 't')
          , testConv "%-03.2f" (Conversion MOD_NONE (𝕵 (-3,'0')) (𝕵 2) 𝕹 'f')
          ]
@@ -185,12 +185,12 @@ commifyRTests =
 
 formatBytesTest ∷ TestTree
 formatBytesTest =
-  let (^^) ∷ Int -> Int -> Int
+  let (^^) ∷ Int → Int → Int
       x ^^ y = x ^ y
-      testBy ∷ Int -> Text -> TestTree
-      testBy v ex = testCase (show v <> "b") $ formatBytes B_1000 v @?= ex
-      testBi ∷ Int -> Text -> TestTree
-      testBi v ex = testCase (show v <> "b") $ formatBytes B_1024 v @?= ex
+      testBy ∷ Int → Text → TestTree
+      testBy v ex = testCase (show v ⊕ "b") $ formatBytes B_1000 v @?= ex
+      testBi ∷ Int → Text → TestTree
+      testBi v ex = testCase (show v ⊕ "b") $ formatBytes B_1024 v @?= ex
    in testGroup "formatBytes" $
         [ testBi 0 "0"
         , testBy 0 "0"
@@ -214,51 +214,64 @@ formatBytesTest =
 
 fillTest ∷ TestTree
 fillTest = testGroup "fill" $
-  let testFill  s i = testCase s $ parse fill s s @?= Right i
-      -- testFillE s e = testCase s $ first show (parseInt s) @?= Left e
+  let testFill  s i = testCase s $ parseString fill ф s ⩼ _Success @?= 𝕵 i
+      -- testFillE s e = testCase s $ first show (parseInt s) @?= 𝕷 e
    in [ testFill "-7" (-7, ' ')
       , testFill "7"  (7, ' ')
       ]
 
-cmp ∷ (Eq a, Show a) => Either String a -> Either String a -> Assertion
-cmp (Left l) (Left r) =
-  assertBool (unlines ["expected: " <> r, "got: " <> l]) $ r `isInfixOf` l
-cmp l r = l @?= r
+{-| Extract error text from an ErrInfo. -}
+eiText ∷ ErrInfo → 𝕋
+-- layoutCompact splits the message string into separate lines
+eiText = renderStrict ∘ layoutPretty defaultLayoutOptions ∘ _errDoc
+
+resultToStr ∷ Show α ⇒ Result α → 𝕊
+resultToStr (Success a) = "Success: " ⊕ show a
+resultToStr (Failure e) = "Failure: " ⊕ unpack (eiText e)
+
+cmp ∷ (Eq α, Show α) => Result α → 𝔼 𝕋 α → Assertion
+cmp got exp =
+  let emsg = unlines ["expected: " ⊕ either unpack show exp
+                     , "got: " ⊕ resultToStr got]
+  in  case (got,exp) of
+        (Failure l, 𝕷 r) → assertBool emsg $ r `isInfixOf` (eiText l)
+        (Success l, 𝕽 r) → l @?= r
+        (_,_)            → assertBool emsg 𝕱
 
 tokensTest ∷ TestTree
 tokensTest =
-  let testTokens ∷ Text -> Either String [Token] -> TestTree
+  let testTokens ∷ Text → 𝔼 𝕋 [Token] → TestTree
       testTokens s expect = testCase (unpack s) $
-                              first show (tokens s) `cmp` expect
+                              (tokens s) `cmp` expect
    in testGroup "tokens"
-         [ testTokens "just a string"    (Right [ Str "just a string" ])
-         , testTokens ""                 (Right [ ])
-         , testTokens "percent %% here"  (Right [ Str "percent % here" ])
-         , testTokens "percent after %%" (Right [ Str "percent after %" ])
-         , testTokens "%%percent before" (Right [ Str "%percent before" ])
-         , testTokens "%"                (Left "unexpected end of input")
-         , testTokens "%%%"              (Left "unexpected end of input")
-         , testTokens "%t%"              (Left "unexpected end of input")
-         , testTokens "% %t"             (Left "unexpected \" \"")
-         , testTokens "%\t%t"            (Left "unexpected \"\\t\"")
-         , testTokens "%t%a"             (Left "unexpected \"a\"")
+         [ testTokens "just a string"    (𝕽 [ Str "just a string" ])
+         , testTokens ""                 (𝕽 [ ])
+         , testTokens "percent %% here"  (𝕽 [ Str "percent % here" ])
+         , testTokens "percent after %%" (𝕽 [ Str "percent after %" ])
+         , testTokens "%%percent before" (𝕽 [ Str "%percent before" ])
+         , testTokens "%"                (𝕷 "unexpected EOF")
+         , testTokens "%%%"              (𝕷 "unexpected EOF")
+         , testTokens "%t%"              (𝕷 "unexpected EOF")
+         , testTokens "% %t"             (𝕷 "error: expected:")
+         , testTokens "%\t%t"            (𝕷 "error: expected:")
+         , testTokens "%t%a"             (𝕷 "error: expected:")
          , testTokens "my %ttoken"
-             (Right [ Str "my ", Conversion MOD_NONE 𝕹 𝕹 𝕹 't'
+             (𝕽 [ Str "my ", Conversion MOD_NONE 𝕹 𝕹 𝕹 't'
                     , Str "token" ])
          , testTokens "%7t token"
-             (Right [ Conversion MOD_NONE (𝕵 (7, ' ')) 𝕹 𝕹 't'
+             (𝕽 [ Conversion MOD_NONE (𝕵 (7, ' ')) 𝕹 𝕹 't'
                     , Str " token" ])
          , testTokens "%-7t%%"
-             (Right [ Conversion MOD_NONE (𝕵 (-7, ' ')) 𝕹 𝕹 't'
+             (𝕽 [ Conversion MOD_NONE (𝕵 (-7, ' ')) 𝕹 𝕹 't'
                     , Str "%" ])
          , testTokens "%07t token"
-             (Right [ Conversion MOD_NONE (𝕵 (7, '0')) 𝕹 𝕹 't'
+             (𝕽 [ Conversion MOD_NONE (𝕵 (7, '0')) 𝕹 𝕹 't'
                     , Str " token" ])
          , testTokens "%-07t%%"
-             (Right [ Conversion MOD_NONE (𝕵 (-7, '0')) 𝕹 𝕹 't'
+             (𝕽 [ Conversion MOD_NONE (𝕵 (-7, '0')) 𝕹 𝕹 't'
                     , Str "%" ])
          , testTokens "%,-07t%%"
-             (Right [ Conversion MOD_COMMIFY (𝕵 (-7, '0')) 𝕹 𝕹 't'
+             (𝕽 [ Conversion MOD_COMMIFY (𝕵 (-7, '0')) 𝕹 𝕹 't'
                     , Str "%" ])
          ]
 
@@ -284,7 +297,7 @@ cs = fromCallSiteList [ ("foo", SrcLoc "a" "b" "c" 8 13 21 34)
 
 fmtTest ∷ TestTree
 fmtTest =
-  let (^^) ∷ Int -> Int -> Int
+  let (^^) ∷ Int → Int → Int
       x ^^ y = x ^ y
       bar = "bar" ∷ String
       dayOne = posixSecondsToUTCTime 94755600

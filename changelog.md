@@ -1,3 +1,7 @@
+0.2.7.0 2022-08-27
+==================
+- add support for commafication
+
 0.2.6.0 2022-04-29
 ==================
 - add 'Q' for shell-quoted lists
