@@ -1,3 +1,8 @@
+0.2.7.1 2022-10-27
+==================
+- add flake
+- use ghc-8.10.7; ghc-9 uses base >= 4.15; text-format-0.3.2 requires base < 4.15
+
 0.2.7.0 2022-08-27
 ==================
 - add support for commafication
