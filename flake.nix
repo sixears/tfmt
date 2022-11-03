@@ -5,7 +5,7 @@
     nixpkgs.url      = "github:nixos/nixpkgs/be44bf67"; # nixos-22.05 2022-10-15
     build-utils.url  = "github:sixears/flake-build-utils/r1.0.0.5";
 
-    base0t.url        = "github:sixears/base0t/r0.0.1.2";
+    base0t.url        = "github:sixears/base0t/r0.0.1.3";
     has-callstack.url = "github:sixears/has-callstack/r1.0.1.7";
     more-unicode.url  = "github:sixears/more-unicode/r0.0.17.4";
     number.url        = "github:sixears/number/r1.1.2.5";
