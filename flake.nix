@@ -11,7 +11,7 @@
     number.url        = "github:sixears/number/r1.1.2.6";
   };
 
-  outputs = { self, nixpkgs, flake-utils, build-utils
+  outputs = { self, nixpkgs, build-utils
             , base0t, has-callstack, more-unicode, number }:
     build-utils.lib.hOutputs self nixpkgs "tfmt" {
       deps = {
