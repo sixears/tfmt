@@ -8,7 +8,7 @@
     base0t.url        = "github:sixears/base0t/r0.0.1.9";
     has-callstack.url = "github:sixears/has-callstack/r1.0.1.11";
     more-unicode.url  = "github:sixears/more-unicode/r0.0.17.8";
-    number.url        = "github:sixears/number/r1.1.2.9";
+    number.url        = "github:sixears/number/r1.1.2.10";
   };
 
   outputs = { self, nixpkgs, build-utils
