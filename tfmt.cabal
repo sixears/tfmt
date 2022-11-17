@@ -10,7 +10,7 @@ name:                tfmt
 -- PVP summary:      +-+------- breaking API changes
 --                   | | +----- non-breaking API additions
 --                   | | | +--- code changes with no API change
-version:             0.2.7.10
+version:             0.2.7.11
 
 -- A short (one-line) description of the package.
 synopsis:            type-safe text/string formatting with a simple interface
