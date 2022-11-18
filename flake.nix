@@ -30,7 +30,7 @@
         in
           mkDerivation {
             pname = "tfmt";
-            version = "0.2.7.15";
+            version = "0.2.7.17";
             src = ./.;
             libraryHaskellDepends = [
               base containers data-textual formatting lens parsers prettyprinter
