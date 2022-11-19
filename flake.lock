@@ -6,16 +6,16 @@
         "nixpkgs": "nixpkgs"
       },
       "locked": {
-        "lastModified": 1668838225,
-        "narHash": "sha256-AYaTZEZIY1ZUs8eZGwdphf7c/xs032z9oX5Uw1nApVI=",
+        "lastModified": 1668838874,
+        "narHash": "sha256-wfFIjPoEJCAoiqw/dbRFxvuahYqmxGA3VCNNCajqHgo=",
         "owner": "sixears",
         "repo": "base0",
-        "rev": "786a9c24dd2c3120b99a209946c85aa5634ad861",
+        "rev": "7674db7b2866ffadc40007accc1664b828035130",
         "type": "github"
       },
       "original": {
         "owner": "sixears",
-        "ref": "r0.0.4.9",
+        "ref": "r0.0.4.10",
         "repo": "base0",
         "type": "github"
       }
@@ -27,16 +27,16 @@
         "nixpkgs": "nixpkgs_2"
       },
       "locked": {
-        "lastModified": 1668838887,
-        "narHash": "sha256-qVYwP47i3YpZh8dZAZNoiiiLVYe0i6dPYt0sPUZjiVE=",
+        "lastModified": 1668840419,
+        "narHash": "sha256-tZ1u+lnBDzXGOZTxGeMrOU0aQwJ/2DeNJgC5zT+TcVA=",
         "owner": "sixears",
         "repo": "base0t",
-        "rev": "31a0025ce59b0d01fbbb255f198a24bbda5a3e4e",
+        "rev": "ad94eebd4999d8fcf13f00fdf9dea859322448ca",
         "type": "github"
       },
       "original": {
         "owner": "sixears",
-        "ref": "r0.0.1.12",
+        "ref": "r0.0.1.13",
         "repo": "base0t",
         "type": "github"
       }
