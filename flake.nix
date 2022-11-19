@@ -19,7 +19,7 @@
       # which has an upper bound on `base` of < 4.15 - ghc 9 uses >= 4.15.1
       ghc = p: p.ghc8107;
 
-      callPackage = { mkDerivation, lib, system
+      callPackage = { mkDerivation, lib, mapPkg, system
                     , base, containers, data-textual, formatting, lens, parsers
                     , prettyprinter, process, tasty, tasty-hunit
                     , template-haskell, text, text-format, text-printer, time
