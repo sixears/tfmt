@@ -6,7 +6,7 @@
     build-utils.url  = github:sixears/flake-build-utils/r1.0.0.13;
 
     base0t.url        = github:sixears/base0t/r0.0.1.14;
-    has-callstack.url = github:sixears/has-callstack/r1.0.1.18;
+    has-callstack.url = github:sixears/has-callstack/r1.0.1.19;
     more-unicode.url  = github:sixears/more-unicode/r0.0.17.12;
     number.url        = github:sixears/number/r1.1.2.14;
   };
@@ -30,7 +30,7 @@
         in
           mkDerivation {
             pname = "tfmt";
-            version = "0.2.7.24";
+            version = "0.2.7.25";
             src = ./.;
             libraryHaskellDepends = [
               base containers data-textual formatting lens parsers prettyprinter
