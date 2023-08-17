@@ -10,7 +10,7 @@ name:                tfmt
 -- PVP summary:      +-+------- breaking API changes
 --                   | | +----- non-breaking API additions
 --                   | | | +--- code changes with no API change
-version:             0.2.7.25
+version:             0.2.8.0
 
 -- A short (one-line) description of the package.
 synopsis:            type-safe text/string formatting with a simple interface
@@ -56,12 +56,14 @@ library
 
   default-extensions: FlexibleContexts
                     , FlexibleInstances
+                    , ImportQualifiedPost
                     , NoImplicitPrelude
                     , OverloadedStrings
                     , PatternSynonyms
                     , QuasiQuotes
                     , ScopedTypeVariables
                     , TemplateHaskell
+                    , TypeApplications
                     , UnicodeSyntax
                     , ViewPatterns
 
@@ -70,14 +72,15 @@ library
 
   -- Other library packages from which modules are imported.
   build-depends: base, containers, data-textual, formatting, lens
-               , parsers, prettyprinter, process, tasty, tasty-hunit
+               , parsers, prettyprinter, process, safe, tasty, tasty-hunit
                , template-haskell, text, text-format, text-printer, time
                , trifecta
 
-               , base0t           >= 0.0.1.0
-               , has-callstack    >= 1.0.1.0
-               , more-unicode     >= 0.0.17.0
-               , number           >= 1.1.2.0
+               , base0t           >= 0.0.1.14
+               , has-callstack    >= 1.0.1.19
+               , more-unicode     >= 0.0.18.0
+               , natural          >= 0.0.5.0
+               , number           >= 1.1.2.14
 
 
   -- Directories containing source files.

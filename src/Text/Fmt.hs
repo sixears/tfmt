@@ -1,3 +1,4 @@
+{-# LANGUAGE UnicodeSyntax #-}
 {- | Format Text or Strings, in a type-safe way, using Quasi Quotations.
 
     @
@@ -21,119 +22,138 @@
  -}
 
 module Text.Fmt
-  ( -- * Format Specifiers
-
-    -- $formatting
-
-    ByteFmtBase(..), FormatTarget(..), ToUTCTimeY( toUTCTimeY )
-  , commify, commifyR, fmt, fmtS, fmtL, fmtT, formatBytes, formatUTCY
+  ( ByteFmtBase(..)
+  , FormatTarget(..)
+  , Justify(..)
+  , ToUTCTimeY(toUTCTimeY)
+  , columnify
+  , commify
+  , commifyR
+  , fmt
+  , fmtL
+  , fmtS
+  , fmtT
+  , formatBytes
+  , formatUTCY
   , formatUTCYDoW
-  -- for testing only
-  , Token(..), conversion, fill, sprintf, tokens )
-where
+    -- for testing only
+  , Token(..)
+  , conversion
+  , fill
+  , sprintf
+  , tokens
+  ) where
 
 import Base0T
-import Prelude ( Double, Int, Integral, Real, RealFloat
-               , (/), (^), (**), decodeFloat, error, floor )
+import Prelude ( Double, Int, Integral, Real, RealFloat, decodeFloat, error,
+                 floor, (*), (**), (/), (^) )
 
 -- base --------------------------------
 
-import Data.Char      ( isDigit, toUpper )
-import Data.Foldable  ( Foldable )
-import Data.List      ( concat, elem, intercalate, reverse )
-import Data.Maybe     ( fromMaybe )
-import GHC.Stack      ( SrcLoc
-                      , getCallStack, srcLocFile, srcLocModule, srcLocPackage
-                      , srcLocEndCol, srcLocEndLine, srcLocStartCol
-                      , srcLocStartLine
-                      )
-import Numeric        ( logBase )
-import Text.Read      ( read )
+import Data.Char     ( isDigit, toUpper )
+import Data.Foldable ( Foldable )
+import Data.List     ( concat, elem, intercalate, repeat, reverse, transpose,
+                       zip, zipWith )
+import Data.Maybe    ( fromMaybe )
+import GHC.Stack     ( SrcLoc, getCallStack, srcLocEndCol, srcLocEndLine,
+                       srcLocFile, srcLocModule, srcLocPackage, srcLocStartCol,
+                       srcLocStartLine )
+import Numeric       ( logBase )
+import Text.Read     ( read )
 
 -- containers --------------------------
 
-import qualified Data.Map.Lazy  as  Map
+import Data.Map.Lazy qualified as Map
 
 -- formatting --------------------------
 
-import qualified  Formatting.Formatters  as  Formatters
+import Formatting.Formatters qualified as Formatters
 
-import Formatting             ( Format, (%), (%.)
-                              , format, formatToString, later, mapf, sformat )
-import Formatting.Formatters  ( bin, fixed, hex, int, oct, shortest, shown
-                              , stext, text )
+import Formatting            ( Format, format, formatToString, later, mapf,
+                               sformat, (%), (%.) )
+import Formatting.Formatters ( bin, fixed, hex, int, oct, shortest, shown,
+                               stext, text )
 
 -- has-callstack -----------------------
 
-import HasCallstack  ( HasCallstack( callstack ) )
+import HasCallstack ( HasCallstack(callstack) )
 
 -- lens --------------------------------
 
-import Control.Lens  ( view )
+import Control.Lens.Each   ( each )
+import Control.Lens.Fold   ( (^..) )
+import Control.Lens.Getter ( view )
 
 -- more-unicode ------------------------
 
-import Data.MoreUnicode.Applicative  ( (∤), (⋪), (⋫), (⊵) )
-import Data.MoreUnicode.Bool         ( 𝔹, pattern 𝕿, pattern 𝕱 )
-import Data.MoreUnicode.Char         ( ℂ )
-import Data.MoreUnicode.Functor      ( (⊳) )
-import Data.MoreUnicode.Lens         ( (⊣) )
-import Data.MoreUnicode.Maybe        ( 𝕄, pattern 𝕵, pattern 𝕹 )
-import Data.MoreUnicode.Monoid       ( ю, ф )
-import Data.MoreUnicode.String       ( 𝕊 )
-import Data.MoreUnicode.Text         ( 𝕋 )
+import Data.MoreUnicode.Applicative ( (∤), (⊵), (⋪), (⋫) )
+import Data.MoreUnicode.Bool        ( 𝔹, pattern 𝕱, pattern 𝕿 )
+import Data.MoreUnicode.Char        ( ℂ )
+import Data.MoreUnicode.Functor     ( (⊳) )
+import Data.MoreUnicode.Lens        ( (⊣), (⊧) )
+import Data.MoreUnicode.Maybe       ( 𝕄, pattern 𝕵, pattern 𝕹 )
+import Data.MoreUnicode.Monoid      ( ф, ю )
+import Data.MoreUnicode.String      ( 𝕊 )
+import Data.MoreUnicode.Text        ( 𝕋 )
+
+-- natural -----------------------------
+
+import Natural ( NumSign(SignMinus, SignPlus), length, replicate, unNegate,
+                 (⊖) )
 
 -- number ------------------------------
 
-import Number  ( ToNum( toNumI ) )
+import Number ( ToNum(toNumI) )
 
 -- parsers -----------------------------
 
-import Text.Parser.Char         ( CharParsing
-                                , char, digit, noneOf, oneOf, string )
-import Text.Parser.Combinators  ( Parsing, (<?>)
-                                , between, choice, eof, option, optional, try )
+import Text.Parser.Char        ( CharParsing, char, digit, noneOf, oneOf,
+                                 string )
+import Text.Parser.Combinators ( Parsing, between, choice, eof, option,
+                                 optional, try, (<?>) )
 
 -- process -----------------------------
 
-import System.Process.Internals  ( translate )
+import System.Process.Internals ( translate )
+
+-- safe --------------------------------
+
+import Safe ( maximumDef )
 
 -- template-haskell --------------------
 
-import Language.Haskell.TH  ( ExpQ, Name, appE, charL, infixE, integerL, litE
-                            , stringL, varE )
-import Language.Haskell.TH.Quote
-                            ( QuasiQuoter( QuasiQuoter, quoteDec
-                                         , quoteExp, quotePat, quoteType ) )
+import Language.Haskell.TH       ( ExpQ, Name, appE, charL, infixE, integerL,
+                                   litE, stringL, varE )
+import Language.Haskell.TH.Quote ( QuasiQuoter(QuasiQuoter, quoteDec, quoteExp, quotePat, quoteType) )
 
 -- text --------------------------------
 
-import qualified  Data.Text               as  Text
-import qualified  Data.Text.Lazy          as  LT
-import qualified  Data.Text.Lazy.Builder  as  LazyBuilder
+import Data.Text              qualified as Text
+import Data.Text.Lazy         qualified as LT
+import Data.Text.Lazy.Builder qualified as LazyBuilder
 
-import Data.Text  ( dropWhileEnd, pack, unpack )
+import Data.Text ( dropWhileEnd, pack, unpack )
 
 -- text-format -------------------------
 
-import Data.Text.Buildable  as  Buildable
+import Data.Text.Buildable as Buildable
 
 -- time --------------------------------
 
-import Data.Time.Clock   ( UTCTime )
-import Data.Time.Format  ( defaultTimeLocale, formatTime )
+import Data.Time.Clock  ( UTCTime )
+import Data.Time.Format ( defaultTimeLocale, formatTime )
 
 -- trifecta ----------------------------
 
-import Text.Trifecta.Parser  ( parseString )
-import Text.Trifecta.Result  ( Result( Failure, Success ) )
+import Text.Trifecta.Parser ( parseString )
+import Text.Trifecta.Result ( Result(Failure, Success) )
 
 ------------------------------------------------------------
 --                     local imports                      --
 ------------------------------------------------------------
 
-import Text.Fmt.Token  ( Modifier( MOD_NONE, MOD_COMMIFY )
-                       , Token( Conversion, Str ) )
+import Text.Fmt.Token ( Modifier(MOD_COMMIFY, MOD_NONE),
+                        Token(Conversion, Str) )
 
 -------------------------------------------------------------------------------
 
@@ -225,8 +245,7 @@ precision = read ⊳ (char '.' ⋫ many digit)
 ----------------------------------------
 
 {- | whether to format a bytes value in terms of powers of 10^3, or 2^10 -}
-data ByteFmtBase = B_1000 | B_1024
-  deriving Eq
+data ByteFmtBase = B_1000 | B_1024 deriving (Eq)
 
 -- | try really hard to fit within 7 chars
 formatBytes ∷ (Formatters.Buildable a, Integral a) ⇒ ByteFmtBase → a → 𝕋
@@ -278,15 +297,15 @@ instance ToUTCTimeY (𝕄 UTCTime) where
      (always in Zulu). -}
 formatUTCY ∷ ToUTCTimeY α ⇒ α → 𝕋
 formatUTCY mt = case toUTCTimeY mt of
-                  𝕵 t  → pack $ formatTime defaultTimeLocale "%FZ%T" t
-                  𝕹 → "-------------------"
+                  𝕵 t → pack $ formatTime defaultTimeLocale "%FZ%T" t
+                  𝕹   → "-------------------"
 
 {- | Format a (Maybe UTCTime), in ISO8601-without-fractional-seconds (always in
      Zulu), with a leading 3-letter day-of-week. -}
 formatUTCYDoW ∷ ToUTCTimeY α ⇒ α → 𝕋
 formatUTCYDoW mt = case toUTCTimeY mt of
-                     𝕵 t  → pack $ formatTime defaultTimeLocale "%FZ%T %a" t
-                     𝕹 → "-----------------------"
+                     𝕵 t → pack $ formatTime defaultTimeLocale "%FZ%T %a" t
+                     𝕹   → "-----------------------"
 
 toFormatUTC ∷ ToUTCTimeY α ⇒ Format ρ (α → ρ)
 toFormatUTC = later $ LazyBuilder.fromText ∘ formatUTCY
@@ -320,7 +339,7 @@ renderStackLine (fname,loc) = let to x y = x ⊕ "→" ⊕ y
 
 formatStackHead ∷ HasCallstack α ⇒ α → 𝕊
 formatStackHead a = case getCallStack (a ⊣ callstack) of
-                      []          → "«NO STACK»"
+                      []      → "«NO STACK»"
                       (loc:_) → renderStackLine loc
 
 toFormatStackHead ∷ HasCallstack α ⇒ Format ρ (α → ρ)
@@ -418,14 +437,14 @@ lefts k c = eachLine (LT.justifyRight (fromIntegral k) c)
 {-| This will only work with numbers… -}
 commify ∷ ℂ → ℤ → LT.Text → LT.Text
 commify c i t =
-  let length = fromIntegral ∘ LT.length
+  let len = fromIntegral ∘ LT.length
   in  case LT.breakOn "e" t of
         (_,"") → case LT.breakOn "." t of
                    (_,"") → commifyL c i t
                    (l,r)  → let r' = commifyR c 0 (LT.tail r)
-                            in  commifyL c (max 0 $ i - length r' - 1) l ⊕"."⊕r'
+                            in  commifyL c (max 0 $ i - len r' - 1) l ⊕"."⊕r'
         (m,e) → let e' = commifyL '¡' 0 (LT.tail e)
-                    m' = commify c (max 0 $ i - length e' - 1) m
+                    m' = commify c (max 0 $ i - len e' - 1) m
                  in m' ⊕ "e" ⊕ e'
 
 {-| Insert a comma inbetween every three digits, from the right.
@@ -464,7 +483,7 @@ commifyR c i t =
   let
     t' = LT.intercalate "," (LT.chunksOf 3 t)
     take = LT.take ∘ fromIntegral
-    replicate = LT.replicate ∘ fromIntegral
+    replicat = LT.replicate ∘ fromIntegral
   in
     if fromIntegral (LT.length t') < i
     then let c'  = LT.singleton c
@@ -472,7 +491,7 @@ commifyR c i t =
              s   = if c ≡ ' ' then " " else ","
              p   = LT.takeWhileEnd isDigit t'
              p'  = LT.replicate (3-LT.length p) c' ⊕ s
-             t'' = take i $ t' ⊕ p' ⊕ replicate i c''
+             t'' = take i $ t' ⊕ p' ⊕ replicat i c''
          in  if ',' ≡ LT.last t''
              then LT.init t'' ⊕ c'
              else t''
@@ -654,7 +673,7 @@ charOpNoPrecision _ chr (𝕵 prec) (𝕵 t) =
 ------------------------------------------------------------
 
 -- second tuple member is whether commafication is supported
-newtype CharOp = CharOp (ℂ → Modifier → (𝕄 ℤ) → (𝕄 ℕ) → (𝕄 𝕋) → ExpQ)
+newtype CharOp = CharOp (ℂ -> Modifier -> (𝕄 ℤ) -> (𝕄 ℕ) -> (𝕄 𝕋) -> ExpQ)
 
 ----------------------------------------
 
@@ -811,5 +830,31 @@ instance FormatTarget LT.Text where
 
 instance FormatTarget 𝕊 where
   output = formatToString
+
+------------------------------------------------------------
+
+{- Given a list of lines, each being a list of columns; pad out the columns
+   to provide an aligned display.
+
+   The columns are padded out according to the input `pads` argument.  Widths
+   are set according to the widest input column.  Columns for which no justify
+   value is provided are left unmolested.
+-}
+data Justify = JustifyLeft | JustifyRight
+
+-- provide fixed width args, and ignore args, and centrejustify args
+
+columnify ∷ [Justify] → [[𝕋]] → [[𝕋]]
+columnify pads zs =
+  let pad_t ∷ ℤ → 𝕋 → 𝕋
+      pad_t (unNegate → (SignMinus,n)) t = replicate @𝕋 (n ⊖ length t) ' ' ⊕ t
+      pad_t (unNegate → (SignPlus, n)) t = t ⊕ replicate @𝕋 (n ⊖ length t) ' '
+
+      col_widths = transpose zs & each ⊧ (\ ys → maximumDef 0 $ length ⊳ ys)
+      xx JustifyLeft  = 1
+      xx JustifyRight = (-1)
+      col_widths' = (\(x,y) → fromIntegral y * (xx  x)) ⊳ zip pads col_widths
+  in
+    (^.. each) ∘ (zipWith pad_t (col_widths' ⊕ repeat 0)) ⊳ zs
 
 -- that's all, folks! ---------------------------------------------------------
