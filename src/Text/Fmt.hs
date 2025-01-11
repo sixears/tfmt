@@ -37,29 +37,44 @@ module Text.Fmt
   , formatUTCY
   , formatUTCYDoW
     -- for testing only
+  , Carry(..)
   , Token(..)
   , conversion
   , fill
+  , ratPostDecimal
   , sprintf
   , tokens
   ) where
 
-import Base0T
-import Prelude ( Double, Int, Integral, Real, RealFloat, decodeFloat, error,
-                 floor, (*), (**), (/), (^) )
+import Debug.Trace ( traceShow )
+
+import Base0T qualified
+
+import Base0T  hiding ( abs, (÷) )
+import Prelude ( Double, Int, Integral, Real, RealFloat, decodeFloat, div,
+                 divMod, error, floor, mod, quot, quotRem, rem, subtract,
+                 toRational, (*), (**), (/), (^) )
 
 -- base --------------------------------
 
+import Data.Ratio qualified
+
 import Data.Char     ( isDigit, toUpper )
 import Data.Foldable ( Foldable )
-import Data.List     ( concat, elem, intercalate, repeat, reverse, transpose,
-                       zip, zipWith )
-import Data.Maybe    ( fromMaybe )
+import Data.List     ( concat, elem, intercalate, repeat, reverse, take,
+                       transpose, zip, zipWith )
+import Data.Maybe    ( fromMaybe, isJust )
+import Data.Ratio    ( Ratio, denominator, numerator )
 import GHC.Stack     ( SrcLoc, getCallStack, srcLocEndCol, srcLocEndLine,
                        srcLocFile, srcLocModule, srcLocPackage, srcLocStartCol,
                        srcLocStartLine )
 import Numeric       ( logBase )
 import Text.Read     ( read )
+import Text.Show     ( shows )
+
+-- base-unicode-symbols ----------------
+
+import Prelude.Unicode ( ℚ, (×) )
 
 -- containers --------------------------
 
@@ -80,6 +95,7 @@ import HasCallstack ( HasCallstack(callstack) )
 
 -- lens --------------------------------
 
+import Control.Lens.At     ( at )
 import Control.Lens.Each   ( each )
 import Control.Lens.Fold   ( (^..) )
 import Control.Lens.Getter ( view )
@@ -87,12 +103,14 @@ import Control.Lens.Getter ( view )
 -- more-unicode ------------------------
 
 import Data.MoreUnicode.Applicative ( (∤), (⊵), (⋪), (⋫) )
-import Data.MoreUnicode.Bool        ( 𝔹, pattern 𝕱, pattern 𝕿 )
+import Data.MoreUnicode.Bool        ( pattern 𝕱, pattern 𝕿 )
 import Data.MoreUnicode.Char        ( ℂ )
+import Data.MoreUnicode.Either      ( 𝔼, pattern 𝕷, pattern 𝕽 )
 import Data.MoreUnicode.Functor     ( (⊳) )
 import Data.MoreUnicode.Lens        ( (⊣), (⊧) )
 import Data.MoreUnicode.Maybe       ( 𝕄, pattern 𝕵, pattern 𝕹 )
 import Data.MoreUnicode.Monoid      ( ф, ю )
+import Data.MoreUnicode.Semigroup   ( (◇) )
 import Data.MoreUnicode.String      ( 𝕊 )
 import Data.MoreUnicode.Text        ( 𝕋 )
 
@@ -138,6 +156,10 @@ import Data.Text ( dropWhileEnd, pack, unpack )
 
 import Data.Text.Buildable as Buildable
 
+-- text-printer ------------------------
+
+import Text.Printer qualified as P
+
 -- time --------------------------------
 
 import Data.Time.Clock  ( UTCTime )
@@ -152,10 +174,30 @@ import Text.Trifecta.Result ( Result(Failure, Success) )
 --                     local imports                      --
 ------------------------------------------------------------
 
-import Text.Fmt.Token ( Modifier(MOD_COMMIFY, MOD_NONE),
+import Text.Fmt.Token ( Modifier(MOD_COLON, MOD_COMMIFY, MOD_NONE),
                         Token(Conversion, Str) )
 
 -------------------------------------------------------------------------------
+
+-- size, including impl. for Map, returning ℕ
+-- ∈, including for Map & Set
+-- check Lens, incl. Control.Lens.At
+
+type RatioN = Ratio ℕ
+
+(÷) = (Data.Ratio.%)
+
+abs ∷ ℤ → ℕ
+abs = fromIntegral ∘ Base0T.abs
+
+toRatioN ∷ Real α ⇒ α → (NumSign, RatioN)
+toRatioN (toRational → a) =
+  let num = numerator a
+      den = denominator a
+      sign = if (num < 0) ≢ (den < 0) then SignMinus else SignPlus
+  in  (sign, (abs num) ÷ (abs den))
+
+------------------------------------------------------------
 
 -- Copied from ParserPlus; to avoid circular import involving
 -- non-empty-containers
@@ -216,14 +258,209 @@ tokenP = many (simpleStr ∤ try escapePC ∤ try escapeSlash ∤ conversion)
 conversion ∷ CharParsing η ⇒ η Token
 conversion =
   Conversion ⊳ (string "%"
-                  ⋫ option MOD_NONE (char ',' ⋫pure MOD_COMMIFY))
+                  ⋫ option MOD_NONE ((char ',' ⋫ pure MOD_COMMIFY) ∤
+                                     (char ':' ⋫ pure MOD_COLON)))
              ⊵ optional fill
              ⊵ optional precision
              ⊵ optional (pack ⊳ boundedDoubledChars '{' '}')
-             ⊵ (oneOf "bdefIkKlLnoqQstTwxyYzZ" ⩻ "valid conversion char")
+             ⊵ (oneOf "bdefIkKlLmnoqQstTwxyYzZ" ⩻ "valid conversion char")
 
+
+------------------------------------------------------------
+
+data Carry = Carry | NoCarry deriving (Eq, Show)
+
+þ ∷ Carry → ℕ
+þ NoCarry = 0
+þ Carry   = 1
+
+------------------------------------------------------------
+
+data Digit = Digit0 | Digit1 | Digit2 | Digit3 | Digit4 | Digit5 | Digit6 | Digit7 | Digit8 | Digit9 deriving
+  ( Eq
+  , Show
+  )
+
+(⨸) ∷ ℕ → ℕ → (Digit,ℕ)
+(⨸) num den | num ≥ den = error $ show num ◇ " ≥ " ◇ show den
+             | otherwise = let (i,next) = (10 × num) `quotRem` den
+                               δ 0 = Digit0
+                               δ 1 = Digit1
+                               δ 2 = Digit2
+                               δ 3 = Digit3
+                               δ 4 = Digit4
+                               δ 5 = Digit5
+                               δ 6 = Digit6
+                               δ 7 = Digit7
+                               δ 8 = Digit8
+                               δ 9 = Digit9
+                           in  (δ i,next)
+
+{-| increment a digit, possibly to a `Carry` -}
+ꙟ ∷ Digit → 𝔼 Carry Digit
+ꙟ Digit0 = 𝕽 Digit1
+ꙟ Digit1 = 𝕽 Digit2
+ꙟ Digit2 = 𝕽 Digit3
+ꙟ Digit3 = 𝕽 Digit4
+ꙟ Digit4 = 𝕽 Digit5
+ꙟ Digit5 = 𝕽 Digit6
+ꙟ Digit6 = 𝕽 Digit7
+ꙟ Digit7 = 𝕽 Digit8
+ꙟ Digit8 = 𝕽 Digit9
+ꙟ Digit9 = 𝕷 Carry
+
+instance Printable Digit where
+  print Digit0 = P.text "0"
+  print Digit1 = P.text "1"
+  print Digit2 = P.text "2"
+  print Digit3 = P.text "3"
+  print Digit4 = P.text "4"
+  print Digit5 = P.text "5"
+  print Digit6 = P.text "6"
+  print Digit7 = P.text "7"
+  print Digit8 = P.text "8"
+  print Digit9 = P.text "9"
+
+{-| Given a numerator & a demoninator, *where `num < den`*; write out the
+    post-decimal-point expansion of the fraction.  The `maxlen` value limits
+    the output to that many characters, rounding the last output character as
+    necessary.  -}
+ratPostDecimal ∷ 𝕄 ℕ → ℕ → ℕ → (𝕊,Carry)
+ratPostDecimal maxlen num den =
+  let collect ∷ ([Digit],[Digit],Carry) → (𝕊,Carry)
+      -- collect = concat ∘ fmap (either show toString)
+--      collect ([],c) = ("",c)
+--      collect [𝕽 d]  = (toString d,NoCarry)
+      -- collect (𝕽 Digit9) : (𝕷 Carry) : xs =
+      collect (ds,rs,c) = first reverse $ foldl go ("",c) (reverse ds)
+        where -- go (s,Carry) Digit9 = ('0':s,Carry)
+            -- go (s,Carry) d      = (toString (ꙟ d) ◇ s,NoCarry)
+            go (s,Carry) d = traceShow ("go",s,Carry,d) $ either (const (s◇"0",Carry)) (\ i → (toString i ◇ s,NoCarry)) (ꙟ d)
+            go (s,NoCarry) d    = traceShow (s,NoCarry,d) $ (s ◇ toString d,NoCarry)
+      xx = ratPostDecimal_ 0 (ф,ф) maxlen num den
+  in  traceShow ("rpd",maxlen,num,den,xx,collect xx) $ collect xx
+
+ -- ADD RECURRING HERE (note: renders poorly in emacs…)
+
+{-| express a RatioN < 1 as a sequence of digits (as used after a decimal
+    point), optionally with a maximum length - which, if not 𝕹, may cause
+    rounding if the post-length bit is ≥ 5…
+
+    The result is a list of digits, optionally followed by a 'carry' bit; which
+    indicates whether the "rest" of the number is ≥ 5…
+
+    The accumulator is used to track if the numerator has been seen - if so,
+    we have a recurring decimal.
+
+    Recurring decimals are represented by a second list in the return.  If
+    non-empty, then that is the list of recurring values.
+-}
+ratPostDecimal_ ∷ ℕ → (Map.Map ℕ ℕ,[Digit]) → 𝕄 ℕ → ℕ → ℕ → ([Digit],[Digit],Carry)
+ratPostDecimal_ _ _ maxlen   0 den = ([],[],NoCarry)
+{-
+ratPostDecimal_ (𝕵 0)  num den =
+  let (i,next) = num ⨸ den -- (10 × num) `quotRem` den
+  in  if (next×10 `quot` den) ≥ 5 then [ꙟ i] else [𝕽 i]
+-}
+ratPostDecimal_ x (acc,sofar) maxlen num den = traceShow ("rpd_",x,maxlen,num,den,acc) $
+  let (i,next) = num ⨸ den -- num (10 × num) `quotRem` den
+  in  case maxlen of
+        𝕹   →
+          -- FIX THIS atm, we only look for recurring in non-length-limited
+          -- Oh, but if it were length-specified, and the repetend repeated
+          -- before we hit the length… nah.
+          case acc ⊣ at num of
+            𝕵 x → (sofar,[Digit4],Carry)
+            𝕹   → let acc' = Map.insert num (fromIntegral $ Map.size acc) acc
+               in  traceShow ("RPD_no",x,sofar,Map.size acc,i,acc,acc') $ first (i:) (ratPostDecimal_ (x+1) (acc',i:sofar) ((subtract 1) ⊳ maxlen) next den)
+
+        𝕵 0 → ([],[],if i ∈ [Digit5,Digit6,Digit7,Digit8,Digit9] then Carry else NoCarry)
+        _   →
+            traceShow ("RPD_mx",x,maxlen,Map.size acc,i,acc) $ first (i:) (ratPostDecimal_ (x+1) (acc,i:sofar) ((subtract 1) ⊳ maxlen) next den)
+
+
+{- represent a RatioN as a decimal, with max `len` digits after the `.` -}
+{-
+ratToDecimal ∷ ℕ → RatioN → 𝕊
+ratToDecimal len rat =
+  let num = numerator rat
+      den = denominator rat
+      (d, next) = num `quotRem` den
+  in  if den ≡ 1
+      then show d
+      else case fromIntegral len of
+             0 → shows d ("." ◇ fst (ratPostDecimal 𝕹 next den))
+             l → shows d ("." ◇ fst (ratPostDecimal (𝕵 l) next den))
+-}
 
 ----------------------------------------
+
+instance Eq NumSign where
+  SignMinus == SignMinus = 𝕿
+  SignPlus  == SignPlus  = 𝕿
+  _         == _         = 𝕱
+
+fmtTime_ ∷ (Show α, Real α) ⇒ Modifier → 𝕄 ℕ → α → 𝕋
+fmtTime_ mod_ prec (toRatioN → (s,t)) | s ≡ SignMinus = "-" ◇ fmtTime_ mod_ prec t
+                                      | otherwise     =
+  let num = numerator t
+      den = denominator t
+
+      (hh,m)  ∷ (ℕ,ℕ)  = num `divMod` (den × 3600)
+      (mm,s)  ∷ (ℕ,ℕ)  = m `divMod` (den × 60)
+      (ss,p)  ∷ (ℕ,ℕ)  = s `divMod` den
+      part    ∷ RatioN = p ÷ den
+      ss_frac ∷ RatioN = (ss ÷ 1) + part
+
+      hms ∷ ℕ → (ℕ,ℕ,ℕ)
+      hms s = (s `div` 3600, (s `mod` 3600) `div` 60,s `mod` 60)
+      sign SignPlus  = ""
+      sign SignMinus = "-"
+
+      colon ∷ ℂ → 𝕊
+      colon c = case (mod_,c) of
+                  (MOD_COLON, 's') → ""
+                  (MOD_COLON, _  ) → [':']
+                  (_        , _  ) → [c]
+
+      {-| show ℕ, then a character - or colon iff `mod_` ≡ MOD_COLON -}
+      show_ ∷ ℕ → ℂ → 𝕊
+      show_ i chr = show i ◇ colon chr
+
+      {-| like `show`, but prefix with '0' if required to make a 2-digit num -}
+      show2 ∷ ℕ → ℂ → 𝕊
+      show2 i chr | i < 10 = "0" ◇ show_ i chr
+                  | otherwise = show_ i chr
+
+      show2s ∷ ℕ → ℕ → ℕ → 𝕊
+      show2s i p den  =
+        case prec of
+          𝕹     →
+            (if ss_frac < 10 then "0" else "") ◇ formatToString (fixed 0) ss_frac ◇ colon 's'
+          𝕵 prc →
+            (if ss_frac < 10 then "0" else "") ◇ formatToString (fixed $ fromIntegral prc) ss_frac ◇ colon 's'
+
+      showS ∷ ℕ → ℕ → ℕ → 𝕊
+      showS i p den  =
+        case prec of
+          𝕹     →
+            formatToString (fixed 0) ss_frac ◇ colon 's'
+          𝕵 prc →
+            formatToString (fixed $ fromIntegral prc) ss_frac ◇ colon 's'
+
+      showHMS ∷ (ℕ,ℕ,ℕ) → 𝕊
+      showHMS (h',m',s') | h' > 0 = ю [show_ h' 'h',show2 m' 'm',show2s s' p den]
+                         | m' > 0 = ю [show_ m' 'm',show2s s' p den]
+                         | otherwise = showS s' p den -- showQ ss (prec,part) "s"
+  in  case den of
+        1 → Text.pack (showHMS ({- hms $ fromIntegral num -} hh,mm,ss))-- (show (hms ñ))
+        _ → -- let (w,p) = num `divMod` den
+--            in  Text.pack $ show (t,mod_,prec,num,w,p,den)
+            let (secs,_) = num `divMod` den
+            in  {- sign p ◇ -} Text.pack (showHMS (hms $ fromIntegral secs)) -- ◇ "." ◇ (ratPostDecimal (𝕵 $ maybe 0 (fromIntegral prec)-1) (fromIntegral frac)  (fromIntegral den)))
+
+fmtTime ∷ (Show α, Real α) ⇒ Modifier → 𝕄 ℕ → Format r (α → r)
+fmtTime mod_ prec = later $ LazyBuilder.fromText ∘ fmtTime_ mod_ prec
 
 ----------------------------------------
 
@@ -316,12 +553,12 @@ toFormatUTCDoW = later $ LazyBuilder.fromText ∘ formatUTCYDoW
 ----------------------------------------
 
 renderStackLine ∷ (𝕊,SrcLoc) → 𝕊
-renderStackLine (fname,loc) = let to x y = x ⊕ "→" ⊕ y
+renderStackLine (fname,loc) = let to x y = x ◇ "→" ◇ y
                                   toS x y = to (show x) (show y)
-                                  col l c = l ⊕ "[" ⊕ c ⊕ "]"
+                                  col l c = l ◇ "[" ◇ c ◇ "]"
                                   colS l c = col (show l) (show c)
                                   pkg = srcLocPackage   loc
-                                  mod = srcLocModule    loc
+                                  mdl = srcLocModule    loc
                                   fn  = srcLocFile      loc
                                   sc  = srcLocStartCol  loc
                                   sl  = srcLocStartLine loc
@@ -329,7 +566,7 @@ renderStackLine (fname,loc) = let to x y = x ⊕ "→" ⊕ y
                                   el  = srcLocEndLine   loc
                                   st  = colS sl sc
                                   ed  = colS el ec
-                                  src = ю [ pkg, ":", mod, ":" ⊕ fn ]
+                                  src = ю [ pkg, ":", mdl, ":" ◇ fn ]
                                   lc = if sl ≡ el
                                        then ю [ col (show sl) (sc `toS` ec) ]
                                        else st `to` ed
@@ -390,28 +627,37 @@ tokOp ∷ Token → ExpQ
 -- literal string
 tokOp (Str s) = litE $ stringL s
 -- conversion, no padding
-tokOp (Conversion mod fill_ prec txt convc) =
+tokOp (Conversion mdl   -- ^ ∷ Modifier - MOD_COMMIFY | MOD_NONE,
+                        --                e.g., MOD_COMMIFY in %,9d
+                  fill_ -- ^ ∷ (𝕄(ℤ,ℂ)) - fill width & char, e.g., (3,'0') in
+                        --                %03.2f
+                  prec  -- ^ ∷ 𝕄 ℕ      - precision, e.g., 2 in %3.2f
+                  txt   -- ^ ∷ 𝕄 𝕋      - string option, e.g., "xx" in %3{xx}f
+                  convc -- ^ ∷ ℂ        - conversion char, e.g., 'f' in %3f
+      ) =
+
   let CharOp op = Map.findWithDefault badconv convc charOps
-                  where badconv = error $ "bad conversion char '" ⊕ [convc] ⊕"'"
-      t = op convc mod (fst ⊳ fill_) prec txt
+                  where badconv = error $ "bad conversion char '" ◇ [convc] ◇"'"
+      t = op convc mdl (fst ⊳ fill_) prec txt
       (w,f) = fromMaybe (0,'!') fill_
   in
-    if mod ≡ MOD_NONE ∨ convc ∈ "dfnxboe"
-    then infixOp '(%.) (fillOp (w,f,mod ≡ MOD_COMMIFY)) t
-    else error $ "commafication not available with conv '" ⊕ [convc] ⊕"'"
-
+    if mdl ∈ [MOD_NONE,MOD_COLON] ∨ convc ∈ "dfnxboe"
+    then infixOp '(%.) (fillOp (w,f,mdl)) t
+    else error $ "commafication not available with conv '" ◇ [convc] ◇"'"
 
 ----------------------------------------
 
--- create a fill expression
-fillIt ∷ Name → ℤ → ℂ → ExpQ
+{- create a fill expression for simple left/right fills (no commafication) -}
+fillIt ∷ Name → ℕ → ℂ → ExpQ
 fillIt direction width c =
-  appE (appE (varE direction) (litE (integerL width))) (litE $ charL c)
+--  appE (appE (varE direction) (litE (integerL width))) (litE $ charL c)
+  appE (appE (varE direction) (appE (varE 'fromInteger) [| width|])) (litE $ charL c)
 
-fillIt' ∷ Name → ℂ → ℤ → ExpQ
-fillIt' f c n =
+fillIt' ∷ Name → ℕ → ℂ → ExpQ
+fillIt' f n c =
   appE (varE 'buildLTFormatter)
-       (appE (appE (varE f) (litE $ charL c)) (litE (integerL n)))
+--       (appE (appE (varE f) (litE $ charL c)) (litE (integerL n)))
+       (appE (appE (varE f) (litE $ charL c)) (appE (varE 'fromInteger) [| n|]))
 
 {- | Transform a `LT` transformer to a `Builder`. -}
 buildLTTrans ∷ Buildable ρ ⇒
@@ -431,7 +677,7 @@ eachLine f =
   buildLTFormatter $ LT.intercalate "\n" ∘ fmap f ∘ LT.split (≡'\n')
 
 {- | Pad out each line to (to the left) a given width with a given character. -}
-lefts ∷ Buildable ρ ⇒ ℤ → ℂ → Format α (ρ → α)
+lefts ∷ Buildable ρ ⇒ ℕ → ℂ → Format α (ρ → α)
 lefts k c = eachLine (LT.justifyRight (fromIntegral k) c)
 
 {-| This will only work with numbers… -}
@@ -439,16 +685,20 @@ commify ∷ ℂ → ℤ → LT.Text → LT.Text
 commify c i t =
   let len = fromIntegral ∘ LT.length
   in  case LT.breakOn "e" t of
-        (_,"") → case LT.breakOn "." t of
-                   (_,"") → commifyL c i t
-                   (l,r)  → let r' = commifyR c 0 (LT.tail r)
-                            in  commifyL c (max 0 $ i - len r' - 1) l ⊕"."⊕r'
-        (m,e) → let e' = commifyL '¡' 0 (LT.tail e)
+        (_,"") → -- no scientific notation
+                 case LT.breakOn "." t of
+                   (_,"") → -- pure integer
+                            commifyL c i t
+                   (l,r)  → -- has decimal point
+                            let r' = commifyR c 0 (LT.tail r)
+                            in  commifyL c (max 0 $ i - len r' - 1) l ◇ "." ◇ r'
+        (m,e) → -- scientific notation
+                let e' = commifyL '¡' {-^ pad shouldn't matter -} 0 (LT.tail e)
                     m' = commify c (max 0 $ i - len e' - 1) m
-                 in m' ⊕ "e" ⊕ e'
+                 in m' ◇ "e" ◇ e'
 
 {-| Insert a comma inbetween every three digits, from the right.
-    If `i` is non-zero, the result will have 'c's added to ensure the minimum
+    If `i` is non-zero, the result will have `c`s added to ensure the minimum
     width.  If 'c' ≡ '0', and i > 0, that padding will be subject to
     commification. Note that the final pad group may have four '0's, to avoid
     leading with a comma.
@@ -467,22 +717,22 @@ commifyL c i t =
                   c'' = LT.replicate 3 c'
                   s   = if c ≡ ' ' then " " else ","
                   p   = LT.takeWhile isDigit t'
-                  p'  = s ⊕ LT.replicate (3-LT.length p) c'
-                  t'' = LT.takeEnd i' $ LT.replicate i' (s ⊕ c'') ⊕ p' ⊕ t'
+                  p'  = s ◇ LT.replicate (3-LT.length p) c'
+                  t'' = LT.takeEnd i' $ LT.replicate i' (s ◇ c'') ◇ p' ◇ t'
               in  if ',' ≡ LT.head t''
-                  then c' ⊕ LT.tail t''
+                  then c' ◇ LT.tail t''
                   else t''
          else t'
     else if i < 0
-         then LT.justifyLeft (abs i') c t'
-         else LT.justifyRight (abs i') c t'
+         then LT.justifyLeft  i' c t'
+         else LT.justifyRight i' c t'
 
 {-| Rightwards commify, for use after a decimal point. -}
-commifyR ∷ ℂ → ℤ → LT.Text → LT.Text
-commifyR c i t =
+commifyR ∷ ℂ → ℕ → LT.Text → LT.Text
+commifyR c {-^ pad character -} i {-^ expected output width, incl. commas -} t =
   let
     t' = LT.intercalate "," (LT.chunksOf 3 t)
-    take = LT.take ∘ fromIntegral
+    tke = LT.take ∘ fromIntegral
     replicat = LT.replicate ∘ fromIntegral
   in
     if fromIntegral (LT.length t') < i
@@ -490,24 +740,28 @@ commifyR c i t =
              c'' = LT.replicate 3 c'
              s   = if c ≡ ' ' then " " else ","
              p   = LT.takeWhileEnd isDigit t'
-             p'  = LT.replicate (3-LT.length p) c' ⊕ s
-             t'' = take i $ t' ⊕ p' ⊕ replicat i c''
+             p'  = LT.replicate (3-LT.length p) c' ◇ s
+             t'' = tke i $ t' ◇ p' ◇ replicat i c''
          in  if ',' ≡ LT.last t''
-             then LT.init t'' ⊕ c'
+             then LT.init t'' ◇ c'
              else t''
     else t'
 
 {- | Pad out each line to (to the right) a given width with a given character.-}
-rights ∷ Buildable ρ ⇒ ℤ → ℂ → Format α (ρ → α)
+rights ∷ Buildable ρ ⇒ ℕ → ℂ → Format α (ρ → α)
 rights k c = eachLine (LT.justifyLeft (fromIntegral k) c)
 
 -- | conversion fill; -x → left, (+)x → right
 
-fillOp ∷ (ℤ,ℂ,𝔹) → ExpQ
-fillOp (i,s,𝕱) | i < 0     = fillIt 'rights (abs i) s
-               | otherwise = fillIt 'lefts       i  s
-fillOp (i,c,𝕿) | i < 0     = fillIt' 'commify c i
-               | otherwise = fillIt' 'commify  c i
+fillOp ∷ (ℤ,ℂ,Modifier) → ExpQ
+fillOp (i,c,m) =
+  if m ≡ MOD_COMMIFY
+  then fillIt' 'commify (abs i) c
+  else
+    if i < 0
+    then fillIt 'rights (abs i) c
+    else fillIt 'lefts  (fromInteger     i)  c
+
 ----------------------------------------
 
 toTextF ∷ Printable t ⇒ Format r (t → r)
@@ -655,6 +909,8 @@ toFormatBytes b = later $ LazyBuilder.fromText ∘ formatBytes b
    [@q@] - `Printable` @ τ ⇒ `translate` t @; shell-quote string.
    [@Q@] - A `Foldable` of things, where the things are instances of
            `Printable`, which are shell-quoted like @q@, and joined with ' '.
+
+   [@m@] - `Real` α    ⇒ render as a timespan; e.g., 1s
 -}
 
 {- | Character op: non-𝕹 precision causes error. -}
@@ -673,6 +929,12 @@ charOpNoPrecision _ chr (𝕵 prec) (𝕵 t) =
 ------------------------------------------------------------
 
 -- second tuple member is whether commafication is supported
+-- function args:
+--   ) conversion character
+--   ) modifier (Commify, or None)
+--   ) fill width
+--   ) precision, e.g., 2 in %3.2f
+--   ) string option, e.g., "xx" in %3{xx}f
 newtype CharOp = CharOp (ℂ -> Modifier -> (𝕄 ℤ) -> (𝕄 ℕ) -> (𝕄 𝕋) -> ExpQ)
 
 ----------------------------------------
@@ -683,8 +945,8 @@ charOps ∷ Map.Map ℂ CharOp
 charOps = Map.fromList $
   let
     no_prec f = CharOp $ \ c _ _ p t → charOpNoPrecision f c p t
-    e_no_text c t = error $ "conversion char '" ⊕ [c] ⊕ "' "
-                          ⊕ "admits no text ({" ⊕ unpack t ⊕ "})"
+    e_no_text c t = error $ "conversion char '" ◇ [c] ◇ "' "
+                          ◇ "admits no text ({" ◇ unpack t ◇ "})"
   in
     [ -- list (foldable), joined with ','
       ('L', no_prec ⟦ toTextListF ⟧)
@@ -722,6 +984,8 @@ charOps = Map.fromList $
 
     , ('k', no_prec ⟦ toFormatStackHead ⟧)
     , ('K', no_prec ⟦ toFormatCallStack ⟧)
+
+    , let char_op _ m _ p _ = [| fmtTime m p |] in ('m',CharOp char_op)
     ]
 
 ----------------------------------------
@@ -847,14 +1111,14 @@ data Justify = JustifyLeft | JustifyRight
 columnify ∷ [Justify] → [[𝕋]] → [[𝕋]]
 columnify pads zs =
   let pad_t ∷ ℤ → 𝕋 → 𝕋
-      pad_t (unNegate → (SignMinus,n)) t = replicate @𝕋 (n ⊖ length t) ' ' ⊕ t
-      pad_t (unNegate → (SignPlus, n)) t = t ⊕ replicate @𝕋 (n ⊖ length t) ' '
+      pad_t (unNegate → (SignMinus,n)) t = replicate @𝕋 (n ⊖ length t) ' ' ◇ t
+      pad_t (unNegate → (SignPlus, n)) t = t ◇ replicate @𝕋 (n ⊖ length t) ' '
 
       col_widths = transpose zs & each ⊧ (\ ys → maximumDef 0 $ length ⊳ ys)
       xx JustifyLeft  = 1
       xx JustifyRight = (-1)
       col_widths' = (\(x,y) → fromIntegral y * (xx  x)) ⊳ zip pads col_widths
   in
-    (^.. each) ∘ (zipWith pad_t (col_widths' ⊕ repeat 0)) ⊳ zs
+    (^.. each) ∘ (zipWith pad_t (col_widths' ◇ repeat 0)) ⊳ zs
 
 -- that's all, folks! ---------------------------------------------------------

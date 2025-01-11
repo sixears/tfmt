@@ -71,10 +71,10 @@ library
   -- other-extensions:
 
   -- Other library packages from which modules are imported.
-  build-depends: base, containers, data-textual, formatting, lens
-               , parsers, prettyprinter, process, safe, tasty, tasty-hunit
-               , template-haskell, text, text-format, text-printer, time
-               , trifecta
+  build-depends: base,  base-unicode-symbols, containers, data-textual
+               , formatting, lens, parsers, prettyprinter, process, safe, tasty
+               , tasty-hunit, template-haskell, text, text-format, text-printer
+               , time, trifecta
 
                , base0t           >= 0.0.1.14
                , has-callstack    >= 1.0.1.19
