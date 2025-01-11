@@ -37,23 +37,18 @@ module Text.Fmt
   , formatUTCY
   , formatUTCYDoW
     -- for testing only
-  , Carry(..)
   , Token(..)
   , conversion
   , fill
-  , ratPostDecimal
   , sprintf
   , tokens
   ) where
-
-import Debug.Trace ( traceShow )
 
 import Base0T qualified
 
 import Base0T  hiding ( abs, (÷) )
 import Prelude ( Double, Int, Integral, Real, RealFloat, decodeFloat, div,
-                 divMod, error, floor, mod, quot, quotRem, rem, subtract,
-                 toRational, (*), (**), (/), (^) )
+                 divMod, error, floor, mod, toRational, (*), (**), (/), (^) )
 
 -- base --------------------------------
 
@@ -61,20 +56,19 @@ import Data.Ratio qualified
 
 import Data.Char     ( isDigit, toUpper )
 import Data.Foldable ( Foldable )
-import Data.List     ( concat, elem, intercalate, repeat, reverse, take,
-                       transpose, zip, zipWith )
-import Data.Maybe    ( fromMaybe, isJust )
+import Data.List     ( concat, elem, intercalate, repeat, reverse, transpose,
+                       zip, zipWith )
+import Data.Maybe    ( fromMaybe )
 import Data.Ratio    ( Ratio, denominator, numerator )
 import GHC.Stack     ( SrcLoc, getCallStack, srcLocEndCol, srcLocEndLine,
                        srcLocFile, srcLocModule, srcLocPackage, srcLocStartCol,
                        srcLocStartLine )
 import Numeric       ( logBase )
 import Text.Read     ( read )
-import Text.Show     ( shows )
 
 -- base-unicode-symbols ----------------
 
-import Prelude.Unicode ( ℚ, (×) )
+import Prelude.Unicode ( (×) )
 
 -- containers --------------------------
 
@@ -95,7 +89,6 @@ import HasCallstack ( HasCallstack(callstack) )
 
 -- lens --------------------------------
 
-import Control.Lens.At     ( at )
 import Control.Lens.Each   ( each )
 import Control.Lens.Fold   ( (^..) )
 import Control.Lens.Getter ( view )
@@ -105,7 +98,6 @@ import Control.Lens.Getter ( view )
 import Data.MoreUnicode.Applicative ( (∤), (⊵), (⋪), (⋫) )
 import Data.MoreUnicode.Bool        ( pattern 𝕱, pattern 𝕿 )
 import Data.MoreUnicode.Char        ( ℂ )
-import Data.MoreUnicode.Either      ( 𝔼, pattern 𝕷, pattern 𝕽 )
 import Data.MoreUnicode.Functor     ( (⊳) )
 import Data.MoreUnicode.Lens        ( (⊣), (⊧) )
 import Data.MoreUnicode.Maybe       ( 𝕄, pattern 𝕵, pattern 𝕹 )
@@ -140,8 +132,8 @@ import Safe ( maximumDef )
 
 -- template-haskell --------------------
 
-import Language.Haskell.TH       ( ExpQ, Name, appE, charL, infixE, integerL,
-                                   litE, stringL, varE )
+import Language.Haskell.TH       ( ExpQ, Name, appE, charL, infixE, litE,
+                                   stringL, varE )
 import Language.Haskell.TH.Quote ( QuasiQuoter(QuasiQuoter, quoteDec, quoteExp, quotePat, quoteType) )
 
 -- text --------------------------------
@@ -185,6 +177,7 @@ import Text.Fmt.Token ( Modifier(MOD_COLON, MOD_COMMIFY, MOD_NONE),
 
 type RatioN = Ratio ℕ
 
+(÷) ∷ ℕ → ℕ → RatioN
 (÷) = (Data.Ratio.%)
 
 abs ∷ ℤ → ℕ
@@ -268,46 +261,10 @@ conversion =
 
 ------------------------------------------------------------
 
-data Carry = Carry | NoCarry deriving (Eq, Show)
-
-þ ∷ Carry → ℕ
-þ NoCarry = 0
-þ Carry   = 1
-
-------------------------------------------------------------
-
 data Digit = Digit0 | Digit1 | Digit2 | Digit3 | Digit4 | Digit5 | Digit6 | Digit7 | Digit8 | Digit9 deriving
   ( Eq
   , Show
   )
-
-(⨸) ∷ ℕ → ℕ → (Digit,ℕ)
-(⨸) num den | num ≥ den = error $ show num ◇ " ≥ " ◇ show den
-             | otherwise = let (i,next) = (10 × num) `quotRem` den
-                               δ 0 = Digit0
-                               δ 1 = Digit1
-                               δ 2 = Digit2
-                               δ 3 = Digit3
-                               δ 4 = Digit4
-                               δ 5 = Digit5
-                               δ 6 = Digit6
-                               δ 7 = Digit7
-                               δ 8 = Digit8
-                               δ 9 = Digit9
-                           in  (δ i,next)
-
-{-| increment a digit, possibly to a `Carry` -}
-ꙟ ∷ Digit → 𝔼 Carry Digit
-ꙟ Digit0 = 𝕽 Digit1
-ꙟ Digit1 = 𝕽 Digit2
-ꙟ Digit2 = 𝕽 Digit3
-ꙟ Digit3 = 𝕽 Digit4
-ꙟ Digit4 = 𝕽 Digit5
-ꙟ Digit5 = 𝕽 Digit6
-ꙟ Digit6 = 𝕽 Digit7
-ꙟ Digit7 = 𝕽 Digit8
-ꙟ Digit8 = 𝕽 Digit9
-ꙟ Digit9 = 𝕷 Carry
 
 instance Printable Digit where
   print Digit0 = P.text "0"
@@ -320,78 +277,6 @@ instance Printable Digit where
   print Digit7 = P.text "7"
   print Digit8 = P.text "8"
   print Digit9 = P.text "9"
-
-{-| Given a numerator & a demoninator, *where `num < den`*; write out the
-    post-decimal-point expansion of the fraction.  The `maxlen` value limits
-    the output to that many characters, rounding the last output character as
-    necessary.  -}
-ratPostDecimal ∷ 𝕄 ℕ → ℕ → ℕ → (𝕊,Carry)
-ratPostDecimal maxlen num den =
-  let collect ∷ ([Digit],[Digit],Carry) → (𝕊,Carry)
-      -- collect = concat ∘ fmap (either show toString)
---      collect ([],c) = ("",c)
---      collect [𝕽 d]  = (toString d,NoCarry)
-      -- collect (𝕽 Digit9) : (𝕷 Carry) : xs =
-      collect (ds,rs,c) = first reverse $ foldl go ("",c) (reverse ds)
-        where -- go (s,Carry) Digit9 = ('0':s,Carry)
-            -- go (s,Carry) d      = (toString (ꙟ d) ◇ s,NoCarry)
-            go (s,Carry) d = traceShow ("go",s,Carry,d) $ either (const (s◇"0",Carry)) (\ i → (toString i ◇ s,NoCarry)) (ꙟ d)
-            go (s,NoCarry) d    = traceShow (s,NoCarry,d) $ (s ◇ toString d,NoCarry)
-      xx = ratPostDecimal_ 0 (ф,ф) maxlen num den
-  in  traceShow ("rpd",maxlen,num,den,xx,collect xx) $ collect xx
-
- -- ADD RECURRING HERE (note: renders poorly in emacs…)
-
-{-| express a RatioN < 1 as a sequence of digits (as used after a decimal
-    point), optionally with a maximum length - which, if not 𝕹, may cause
-    rounding if the post-length bit is ≥ 5…
-
-    The result is a list of digits, optionally followed by a 'carry' bit; which
-    indicates whether the "rest" of the number is ≥ 5…
-
-    The accumulator is used to track if the numerator has been seen - if so,
-    we have a recurring decimal.
-
-    Recurring decimals are represented by a second list in the return.  If
-    non-empty, then that is the list of recurring values.
--}
-ratPostDecimal_ ∷ ℕ → (Map.Map ℕ ℕ,[Digit]) → 𝕄 ℕ → ℕ → ℕ → ([Digit],[Digit],Carry)
-ratPostDecimal_ _ _ maxlen   0 den = ([],[],NoCarry)
-{-
-ratPostDecimal_ (𝕵 0)  num den =
-  let (i,next) = num ⨸ den -- (10 × num) `quotRem` den
-  in  if (next×10 `quot` den) ≥ 5 then [ꙟ i] else [𝕽 i]
--}
-ratPostDecimal_ x (acc,sofar) maxlen num den = traceShow ("rpd_",x,maxlen,num,den,acc) $
-  let (i,next) = num ⨸ den -- num (10 × num) `quotRem` den
-  in  case maxlen of
-        𝕹   →
-          -- FIX THIS atm, we only look for recurring in non-length-limited
-          -- Oh, but if it were length-specified, and the repetend repeated
-          -- before we hit the length… nah.
-          case acc ⊣ at num of
-            𝕵 x → (sofar,[Digit4],Carry)
-            𝕹   → let acc' = Map.insert num (fromIntegral $ Map.size acc) acc
-               in  traceShow ("RPD_no",x,sofar,Map.size acc,i,acc,acc') $ first (i:) (ratPostDecimal_ (x+1) (acc',i:sofar) ((subtract 1) ⊳ maxlen) next den)
-
-        𝕵 0 → ([],[],if i ∈ [Digit5,Digit6,Digit7,Digit8,Digit9] then Carry else NoCarry)
-        _   →
-            traceShow ("RPD_mx",x,maxlen,Map.size acc,i,acc) $ first (i:) (ratPostDecimal_ (x+1) (acc,i:sofar) ((subtract 1) ⊳ maxlen) next den)
-
-
-{- represent a RatioN as a decimal, with max `len` digits after the `.` -}
-{-
-ratToDecimal ∷ ℕ → RatioN → 𝕊
-ratToDecimal len rat =
-  let num = numerator rat
-      den = denominator rat
-      (d, next) = num `quotRem` den
-  in  if den ≡ 1
-      then show d
-      else case fromIntegral len of
-             0 → shows d ("." ◇ fst (ratPostDecimal 𝕹 next den))
-             l → shows d ("." ◇ fst (ratPostDecimal (𝕵 l) next den))
--}
 
 ----------------------------------------
 
@@ -414,8 +299,6 @@ fmtTime_ mod_ prec (toRatioN → (s,t)) | s ≡ SignMinus = "-" ◇ fmtTime_ mod
 
       hms ∷ ℕ → (ℕ,ℕ,ℕ)
       hms s = (s `div` 3600, (s `mod` 3600) `div` 60,s `mod` 60)
-      sign SignPlus  = ""
-      sign SignMinus = "-"
 
       colon ∷ ℂ → 𝕊
       colon c = case (mod_,c) of
@@ -433,7 +316,7 @@ fmtTime_ mod_ prec (toRatioN → (s,t)) | s ≡ SignMinus = "-" ◇ fmtTime_ mod
                   | otherwise = show_ i chr
 
       show2s ∷ ℕ → ℕ → ℕ → 𝕊
-      show2s i p den  =
+      show2s _i _p _den  =
         case prec of
           𝕹     →
             (if ss_frac < 10 then "0" else "") ◇ formatToString (fixed 0) ss_frac ◇ colon 's'
@@ -441,7 +324,7 @@ fmtTime_ mod_ prec (toRatioN → (s,t)) | s ≡ SignMinus = "-" ◇ fmtTime_ mod
             (if ss_frac < 10 then "0" else "") ◇ formatToString (fixed $ fromIntegral prc) ss_frac ◇ colon 's'
 
       showS ∷ ℕ → ℕ → ℕ → 𝕊
-      showS i p den  =
+      showS _i _p _den  =
         case prec of
           𝕹     →
             formatToString (fixed 0) ss_frac ◇ colon 's'
@@ -451,13 +334,11 @@ fmtTime_ mod_ prec (toRatioN → (s,t)) | s ≡ SignMinus = "-" ◇ fmtTime_ mod
       showHMS ∷ (ℕ,ℕ,ℕ) → 𝕊
       showHMS (h',m',s') | h' > 0 = ю [show_ h' 'h',show2 m' 'm',show2s s' p den]
                          | m' > 0 = ю [show_ m' 'm',show2s s' p den]
-                         | otherwise = showS s' p den -- showQ ss (prec,part) "s"
+                         | otherwise = showS s' p den
   in  case den of
-        1 → Text.pack (showHMS ({- hms $ fromIntegral num -} hh,mm,ss))-- (show (hms ñ))
-        _ → -- let (w,p) = num `divMod` den
---            in  Text.pack $ show (t,mod_,prec,num,w,p,den)
-            let (secs,_) = num `divMod` den
-            in  {- sign p ◇ -} Text.pack (showHMS (hms $ fromIntegral secs)) -- ◇ "." ◇ (ratPostDecimal (𝕵 $ maybe 0 (fromIntegral prec)-1) (fromIntegral frac)  (fromIntegral den)))
+        1 → Text.pack (showHMS (hh,mm,ss))
+        _ → let secs = num `div` den
+            in  Text.pack (showHMS (hms $ fromIntegral secs))
 
 fmtTime ∷ (Show α, Real α) ⇒ Modifier → 𝕄 ℕ → Format r (α → r)
 fmtTime mod_ prec = later $ LazyBuilder.fromText ∘ fmtTime_ mod_ prec
