@@ -47,8 +47,8 @@ module Text.Fmt
 import Base0T qualified
 
 import Base0T  hiding ( abs, (÷) )
-import Prelude ( Double, Int, Integral, Real, RealFloat, decodeFloat, div,
-                 divMod, error, floor, mod, toRational, (*), (**), (/), (^) )
+import Prelude ( Double, Integral, Num, Real, RealFloat, decodeFloat, divMod,
+                 error, floor, toRational, (*), (**), (/), (^) )
 
 -- base --------------------------------
 
@@ -80,8 +80,8 @@ import Formatting.Formatters qualified as Formatters
 
 import Formatting            ( Format, format, formatToString, later, mapf,
                                sformat, (%), (%.) )
-import Formatting.Formatters ( bin, fixed, hex, int, oct, shortest, shown,
-                               stext, text )
+import Formatting.Formatters ( bin, hex, int, oct, shortest, shown, stext,
+                               text )
 
 -- has-callstack -----------------------
 
@@ -148,10 +148,6 @@ import Data.Text ( dropWhileEnd, pack, unpack )
 
 import Data.Text.Buildable as Buildable
 
--- text-printer ------------------------
-
-import Text.Printer qualified as P
-
 -- time --------------------------------
 
 import Data.Time.Clock  ( UTCTime )
@@ -189,6 +185,14 @@ toRatioN (toRational → a) =
       den = denominator a
       sign = if (num < 0) ≢ (den < 0) then SignMinus else SignPlus
   in  (sign, (abs num) ÷ (abs den))
+
+fixed ∷ Real α ⇒ ℕ → Format β (α → β)
+fixed n = Formatters.fixed (fromIntegral n)
+
+instance Eq NumSign where
+  SignMinus == SignMinus = 𝕿
+  SignPlus  == SignPlus  = 𝕿
+  _         == _         = 𝕱
 
 ------------------------------------------------------------
 
@@ -258,47 +262,24 @@ conversion =
              ⊵ optional (pack ⊳ boundedDoubledChars '{' '}')
              ⊵ (oneOf "bdefIkKlLmnoqQstTwxyYzZ" ⩻ "valid conversion char")
 
-
-------------------------------------------------------------
-
-data Digit = Digit0 | Digit1 | Digit2 | Digit3 | Digit4 | Digit5 | Digit6 | Digit7 | Digit8 | Digit9 deriving
-  ( Eq
-  , Show
-  )
-
-instance Printable Digit where
-  print Digit0 = P.text "0"
-  print Digit1 = P.text "1"
-  print Digit2 = P.text "2"
-  print Digit3 = P.text "3"
-  print Digit4 = P.text "4"
-  print Digit5 = P.text "5"
-  print Digit6 = P.text "6"
-  print Digit7 = P.text "7"
-  print Digit8 = P.text "8"
-  print Digit9 = P.text "9"
-
 ----------------------------------------
 
-instance Eq NumSign where
-  SignMinus == SignMinus = 𝕿
-  SignPlus  == SignPlus  = 𝕿
-  _         == _         = 𝕱
-
-fmtTime_ ∷ (Show α, Real α) ⇒ Modifier → 𝕄 ℕ → α → 𝕋
-fmtTime_ mod_ prec (toRatioN → (s,t)) | s ≡ SignMinus = "-" ◇ fmtTime_ mod_ prec t
-                                      | otherwise     =
-  let num = numerator t
-      den = denominator t
+{-| Split a RatioN into hours, minutes, seconds, part -}
+hmsp ∷ RatioN → (ℕ,ℕ,ℕ,RatioN)
+hmsp secs =
+  let num = numerator secs
+      den = denominator secs
 
       (hh,m)  ∷ (ℕ,ℕ)  = num `divMod` (den × 3600)
       (mm,s)  ∷ (ℕ,ℕ)  = m `divMod` (den × 60)
       (ss,p)  ∷ (ℕ,ℕ)  = s `divMod` den
-      part    ∷ RatioN = p ÷ den
-      ss_frac ∷ RatioN = (ss ÷ 1) + part
+  in  (hh,mm,ss, p ÷ den)
 
-      hms ∷ ℕ → (ℕ,ℕ,ℕ)
-      hms s = (s `div` 3600, (s `mod` 3600) `div` 60,s `mod` 60)
+fmtTime_ ∷ (Show α, Real α) ⇒ Modifier → 𝕄 ℕ → α → 𝕋
+fmtTime_ mod_ prec (toRatioN → (sign,secs)) | sign ≡ SignMinus =
+                                              "-" ◇ fmtTime_ mod_ prec secs
+                                            | otherwise     =
+  let (hh,mm,ss,part) = hmsp secs
 
       colon ∷ ℂ → 𝕊
       colon c = case (mod_,c) of
@@ -306,39 +287,32 @@ fmtTime_ mod_ prec (toRatioN → (s,t)) | s ≡ SignMinus = "-" ◇ fmtTime_ mod
                   (MOD_COLON, _  ) → [':']
                   (_        , _  ) → [c]
 
+      {-| a "0" if input < 10 -}
+      p0_10 ∷ (Ord α, Num α) ⇒ α → 𝕊
+      p0_10 x | x < 10    = "0"
+              | otherwise = ""
+
       {-| show ℕ, then a character - or colon iff `mod_` ≡ MOD_COLON -}
-      show_ ∷ ℕ → ℂ → 𝕊
+      show_ ∷ Show α ⇒ α → ℂ → 𝕊
       show_ i chr = show i ◇ colon chr
 
-      {-| like `show`, but prefix with '0' if required to make a 2-digit num -}
-      show2 ∷ ℕ → ℂ → 𝕊
-      show2 i chr | i < 10 = "0" ◇ show_ i chr
-                  | otherwise = show_ i chr
+      {-| like `show_`, but prefix with '0' if required to make a 2-digit num -}
+      show2 ∷ (Show α, Ord α, Num α) ⇒ α → ℂ → 𝕊
+      show2 i c = p0_10 i ◇ show_ i c
 
-      show2s ∷ ℕ → ℕ → ℕ → 𝕊
-      show2s _i _p _den  =
-        case prec of
-          𝕹     →
-            (if ss_frac < 10 then "0" else "") ◇ formatToString (fixed 0) ss_frac ◇ colon 's'
-          𝕵 prc →
-            (if ss_frac < 10 then "0" else "") ◇ formatToString (fixed $ fromIntegral prc) ss_frac ◇ colon 's'
+      showS ∷ RatioN → 𝕊
+      showS ss_frac  =
+        formatToString (fixed $ fromMaybe 0 prec) ss_frac ◇ colon 's'
 
-      showS ∷ ℕ → ℕ → ℕ → 𝕊
-      showS _i _p _den  =
-        case prec of
-          𝕹     →
-            formatToString (fixed 0) ss_frac ◇ colon 's'
-          𝕵 prc →
-            formatToString (fixed $ fromIntegral prc) ss_frac ◇ colon 's'
+      show2s ∷ RatioN → 𝕊
+      show2s ss_frac = p0_10 ss_frac ◇ showS ss_frac
 
-      showHMS ∷ (ℕ,ℕ,ℕ) → 𝕊
-      showHMS (h',m',s') | h' > 0 = ю [show_ h' 'h',show2 m' 'm',show2s s' p den]
-                         | m' > 0 = ю [show_ m' 'm',show2s s' p den]
-                         | otherwise = showS s' p den
-  in  case den of
-        1 → Text.pack (showHMS (hh,mm,ss))
-        _ → let secs = num `div` den
-            in  Text.pack (showHMS (hms $ fromIntegral secs))
+      showHMSp ∷ (ℕ,ℕ,ℕ,RatioN) → 𝕊
+      showHMSp (h',m',s',p') | h' > 0 = ю [ show_ h' 'h', show2 m' 'm'
+                                          , show2s ((s'÷ 1) + p')]
+                             | m' > 0 = ю [ show_ m' 'm', show2s ((s'÷ 1) + p') ]
+                             | otherwise = showS ((s'÷ 1) + p')
+  in Text.pack (showHMSp (hh,mm,ss,part))
 
 fmtTime ∷ (Show α, Real α) ⇒ Modifier → 𝕄 ℕ → Format r (α → r)
 fmtTime mod_ prec = later $ LazyBuilder.fromText ∘ fmtTime_ mod_ prec
@@ -882,10 +856,10 @@ tonum = mapf toNumI int
 
 ----------------------------------------
 
-expt ∷  RealFloat α ⇒ Int → Format r (α → r)
-expt i = later (\ f →
+expt ∷  RealFloat α ⇒ ℕ → Format r (α → r)
+expt n = later (\ f →
   let (m,e ∷ ℤ) = decompose f
-   in LazyBuilder.fromText $ (sformat $ (fixed i % "e" % int)) m e)
+   in LazyBuilder.fromText $ (sformat $ (fixed n % "e" % int)) m e)
 
 ----------------------------------------
 
