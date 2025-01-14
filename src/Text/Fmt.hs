@@ -1,4 +1,7 @@
+{-# LANGUAGE InstanceSigs  #-}
+{-# LANGUAGE TypeFamilies  #-}
 {-# LANGUAGE UnicodeSyntax #-}
+
 {- | Format Text or Strings, in a type-safe way, using Quasi Quotations.
 
     @
@@ -44,6 +47,8 @@ module Text.Fmt
   , tokens
   ) where
 
+import Debug.Trace ( traceShow )
+
 import Base0T qualified
 
 import Base0T  hiding ( abs, (÷) )
@@ -56,10 +61,12 @@ import Data.Ratio qualified
 
 import Data.Char     ( isDigit, toUpper )
 import Data.Foldable ( Foldable )
+import Data.Kind     ( Type )
 import Data.List     ( concat, elem, intercalate, repeat, reverse, transpose,
                        zip, zipWith )
 import Data.Maybe    ( fromMaybe )
 import Data.Ratio    ( Ratio, denominator, numerator )
+import GHC.Int       ( Int64 )
 import GHC.Stack     ( SrcLoc, getCallStack, srcLocEndCol, srcLocEndLine,
                        srcLocFile, srcLocModule, srcLocPackage, srcLocStartCol,
                        srcLocStartLine )
@@ -132,8 +139,8 @@ import Safe ( maximumDef )
 
 -- template-haskell --------------------
 
-import Language.Haskell.TH       ( ExpQ, Name, appE, charL, infixE, litE,
-                                   stringL, varE )
+import Language.Haskell.TH       ( ExpQ, Name, appE, charL, infixE, integerL,
+                                   litE, stringL, varE )
 import Language.Haskell.TH.Quote ( QuasiQuoter(QuasiQuoter, quoteDec, quoteExp, quotePat, quoteType) )
 
 -- text --------------------------------
@@ -176,8 +183,20 @@ type RatioN = Ratio ℕ
 (÷) ∷ ℕ → ℕ → RatioN
 (÷) = (Data.Ratio.%)
 
-abs ∷ ℤ → ℕ
-abs = fromIntegral ∘ Base0T.abs
+class Abs α where
+  type Abs' α ∷ Type
+  abs ∷ α → Abs' α
+  abs' ∷ α → α
+
+instance Abs ℤ where
+  type Abs' ℤ = ℕ
+  abs = fromIntegral ∘ Base0T.abs
+  abs' = Base0T.abs
+
+instance Abs Int64 where
+  type Abs' Int64 = Word64
+  abs = fromIntegral ∘ Base0T.abs
+  abs' = Base0T.abs
 
 toRatioN ∷ Real α ⇒ α → (NumSign, RatioN)
 toRatioN (toRational → a) =
@@ -310,7 +329,8 @@ fmtTime_ mod_ prec (toRatioN → (sign,secs)) | sign ≡ SignMinus =
       showHMSp ∷ (ℕ,ℕ,ℕ,RatioN) → 𝕊
       showHMSp (h',m',s',p') | h' > 0 = ю [ show_ h' 'h', show2 m' 'm'
                                           , show2s ((s'÷ 1) + p')]
-                             | m' > 0 = ю [ show_ m' 'm', show2s ((s'÷ 1) + p') ]
+                             | m' > 0 = ю [ show_ m' 'm',
+                                            show2s ((s'÷ 1) + p') ]
                              | otherwise = showS ((s'÷ 1) + p')
   in Text.pack (showHMSp (hh,mm,ss,part))
 
@@ -508,11 +528,11 @@ fillIt direction width c =
 --  appE (appE (varE direction) (litE (integerL width))) (litE $ charL c)
   appE (appE (varE direction) (appE (varE 'fromInteger) [| width|])) (litE $ charL c)
 
-fillIt' ∷ Name → ℕ → ℂ → ExpQ
+fillIt' ∷ Name → ℤ → ℂ → ExpQ
 fillIt' f n c =
   appE (varE 'buildLTFormatter)
---       (appE (appE (varE f) (litE $ charL c)) (litE (integerL n)))
-       (appE (appE (varE f) (litE $ charL c)) (appE (varE 'fromInteger) [| n|]))
+       (appE (appE (varE f) (litE $ charL c)) (litE (integerL n)))
+--       (appE (appE (varE f) (litE $ charL c)) (appE (varE 'fromInteger) [| n|]))
 
 {- | Transform a `LT` transformer to a `Builder`. -}
 buildLTTrans ∷ Buildable ρ ⇒
@@ -559,7 +579,7 @@ commify c i t =
     leading with a comma.
 -}
 commifyL ∷ ℂ → ℤ → LT.Text → LT.Text
-commifyL c i t =
+commifyL c i t = traceShow ("commifyL",c,i,t) $
   let
     t' = -- t, commified (from the right, working left; as is standard with
          -- integers)
@@ -579,8 +599,8 @@ commifyL c i t =
                   else t''
          else t'
     else if i < 0
-         then LT.justifyLeft  i' c t'
-         else LT.justifyRight i' c t'
+         then LT.justifyLeft  (abs' i') c t'
+         else LT.justifyRight (abs' i') c t'
 
 {-| Rightwards commify, for use after a decimal point. -}
 commifyR ∷ ℂ → ℕ → LT.Text → LT.Text
@@ -611,7 +631,7 @@ rights k c = eachLine (LT.justifyLeft (fromIntegral k) c)
 fillOp ∷ (ℤ,ℂ,Modifier) → ExpQ
 fillOp (i,c,m) =
   if m ≡ MOD_COMMIFY
-  then fillIt' 'commify (abs i) c
+  then fillIt' 'commify i c
   else
     if i < 0
     then fillIt 'rights (abs i) c
@@ -783,13 +803,12 @@ charOpNoPrecision _ chr (𝕵 prec) (𝕵 t) =
 
 ------------------------------------------------------------
 
--- second tuple member is whether commafication is supported
 -- function args:
 --   ) conversion character
 --   ) modifier (Commify, or None)
 --   ) fill width
 --   ) precision, e.g., 2 in %3.2f
---   ) string option, e.g., "xx" in %3{xx}f
+--   ) string option, e.g., "xx" in %3{xx}f (currently unused)
 newtype CharOp = CharOp (ℂ -> Modifier -> (𝕄 ℤ) -> (𝕄 ℕ) -> (𝕄 𝕋) -> ExpQ)
 
 ----------------------------------------
@@ -840,7 +859,9 @@ charOps = Map.fromList $
     , ('k', no_prec ⟦ toFormatStackHead ⟧)
     , ('K', no_prec ⟦ toFormatCallStack ⟧)
 
-    , let char_op _ m _ p _ = [| fmtTime m p |] in ('m',CharOp char_op)
+    , let char_op _ m _ p 𝕹     = [| fmtTime m p |]
+          char_op c _ _ p (𝕵 t) = e_no_text c t
+      in  ('m',CharOp char_op)
     ]
 
 ----------------------------------------

@@ -352,7 +352,7 @@ fmtTest =
     , -- yes, 7,777000 - that is, a commified 7,777; plus 0 to fill.
       -- we don't try to commify 0s on the RHS, that probably doesn't make any
       -- sense.
-      testCase ",7777@-08" $ [fmt|%,-08d|] (7777 ∷ Int) @?= ("7,777000" ∷ 𝕋)
+      testCase ",5555@-08" $ [fmt|%,-08d|] (5555 ∷ Int) @?= ("5,555000" ∷ 𝕋)
     , testCase ",7777@-06" $ [fmt|%,-06d|] (7777 ∷ Int) @?= ("7,7770" ∷ 𝕋)
     , testCase ",7777@-7" $ [fmt|%,-7d|] (7777 ∷ Int) @?= ("7,777  " ∷ 𝕋)
     , testCase ",7777@-8" $ [fmt|%,-8d|] (7777 ∷ Int) @?= ("7,777   " ∷ 𝕋)
@@ -519,8 +519,6 @@ fmtTest =
     , check    "-1:01:01 " $ [fmt|%:-9m|]  (-3661 ∷ ℤ)
     , check "-1:01:01 "    $ [fmt|%:-9m|]  (-3661.01 ∷ Float)
     , check "-1:01:01.01 " $ [fmt|%:-12.2m|] (-3661.01 ∷ Float)
-    -- add checks for {xx} in other tests
-    , check "-1:01:01.01 " $ [fmt|%:-9{xx}m|]  (-3661.01 ∷ Float)
     ]
 
 -- that's all, folks! ---------------------------------------------------------
