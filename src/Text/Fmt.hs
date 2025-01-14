@@ -1,6 +1,7 @@
-{-# LANGUAGE InstanceSigs  #-}
-{-# LANGUAGE TypeFamilies  #-}
-{-# LANGUAGE UnicodeSyntax #-}
+{-# LANGUAGE InstanceSigs         #-}
+{-# LANGUAGE TypeFamilies         #-}
+{-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE UnicodeSyntax        #-}
 
 {- | Format Text or Strings, in a type-safe way, using Quasi Quotations.
 
@@ -180,13 +181,17 @@ import Text.Fmt.Token ( Modifier(MOD_COLON, MOD_COMMIFY, MOD_NONE),
 
 type RatioN = Ratio ℕ
 
-(÷) ∷ ℕ → ℕ → RatioN
+-- (÷) ∷ ℕ → ℕ → RatioN
+(÷) ∷ Integral α ⇒ α → α → Ratio α
 (÷) = (Data.Ratio.%)
 
-class Abs α where
+class (Ord α, Num α) ⇒ Abs α where
   type Abs' α ∷ Type
   abs ∷ α → Abs' α
   abs' ∷ α → α
+  abs_ ∷ α → (NumSign,Abs' α)
+  abs_ n | n < 0     = (SignMinus, abs n)
+         | otherwise = (SignPlus, abs n)
 
 instance Abs ℤ where
   type Abs' ℤ = ℕ
@@ -198,12 +203,12 @@ instance Abs Int64 where
   abs = fromIntegral ∘ Base0T.abs
   abs' = Base0T.abs
 
+instance (Integral α, Abs α, Integral (Abs' α)) ⇒ Abs (Ratio α) where
+  type Abs' (Ratio α) = Ratio (Abs' α)
+  abs a = abs (numerator a) ÷ abs (denominator a)
+
 toRatioN ∷ Real α ⇒ α → (NumSign, RatioN)
-toRatioN (toRational → a) =
-  let num = numerator a
-      den = denominator a
-      sign = if (num < 0) ≢ (den < 0) then SignMinus else SignPlus
-  in  (sign, (abs num) ÷ (abs den))
+toRatioN (toRational → a) = abs_ a
 
 fixed ∷ Real α ⇒ ℕ → Format β (α → β)
 fixed n = Formatters.fixed (fromIntegral n)
